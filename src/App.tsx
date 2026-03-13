@@ -1,28 +1,491 @@
+import { useState } from "react";
+import Icon from "@/components/ui/icon";
 
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
+type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
 
-const queryClient = new QueryClient();
+const CONTACTS = [
+  { id: 1, name: "Алёна Морозова", status: "В сети", avatar: "АМ", color: "from-purple-500 to-pink-500", online: true },
+  { id: 2, name: "Дмитрий Волков", status: "Был в сети 5 мин назад", avatar: "ДВ", color: "from-blue-500 to-cyan-500", online: false },
+  { id: 3, name: "Екатерина Лисова", status: "В сети", avatar: "ЕЛ", color: "from-emerald-500 to-teal-500", online: true },
+  { id: 4, name: "Игорь Петров", status: "Был в сети час назад", avatar: "ИП", color: "from-orange-500 to-red-500", online: false },
+  { id: 5, name: "Команда Nova", status: "42 участника", avatar: "КН", color: "from-violet-500 to-purple-600", online: true },
+  { id: 6, name: "Маша Климова", status: "В сети", avatar: "МК", color: "from-pink-500 to-rose-500", online: true },
+];
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+const CHATS = [
+  { id: 1, contact: CONTACTS[0], lastMsg: "Увидимся на встрече!", time: "14:32", unread: 3 },
+  { id: 2, contact: CONTACTS[4], lastMsg: "Дизайн утверждён ✓", time: "13:15", unread: 0 },
+  { id: 3, contact: CONTACTS[2], lastMsg: "Отправила файлы", time: "12:08", unread: 1 },
+  { id: 4, contact: CONTACTS[1], lastMsg: "Хорошо, созвонимся", time: "вчера", unread: 0 },
+  { id: 5, contact: CONTACTS[5], lastMsg: "Спасибо за помощь!", time: "вчера", unread: 0 },
+  { id: 6, contact: CONTACTS[3], lastMsg: "Жду подтверждения", time: "пн", unread: 0 },
+];
 
-export default App;
+const MESSAGES: Record<number, { id: number; text: string; out: boolean; time: string }[]> = {
+  1: [
+    { id: 1, text: "Привет! Как дела с проектом?", out: false, time: "14:20" },
+    { id: 2, text: "Всё отлично! Почти закончила дизайн", out: true, time: "14:22" },
+    { id: 3, text: "Когда сможешь показать?", out: false, time: "14:25" },
+    { id: 4, text: "Сегодня вечером отправлю в общий чат", out: true, time: "14:28" },
+    { id: 5, text: "Увидимся на встрече!", out: false, time: "14:32" },
+  ],
+  2: [
+    { id: 1, text: "Команда, нужно обсудить релиз", out: false, time: "12:00" },
+    { id: 2, text: "Готов! Когда звонок?", out: true, time: "12:05" },
+    { id: 3, text: "В 15:00 по МСК", out: false, time: "12:10" },
+    { id: 4, text: "Дизайн утверждён ✓", out: false, time: "13:15" },
+  ],
+  3: [
+    { id: 1, text: "Можешь проверить документы?", out: false, time: "11:50" },
+    { id: 2, text: "Конечно, скидывай", out: true, time: "11:55" },
+    { id: 3, text: "Отправила файлы", out: false, time: "12:08" },
+  ],
+};
+
+const CALLS = [
+  { id: 1, contact: CONTACTS[0], type: "video", direction: "incoming", time: "Сегодня, 11:20", duration: "12:34", missed: false },
+  { id: 2, contact: CONTACTS[1], type: "audio", direction: "outgoing", time: "Сегодня, 09:45", duration: "05:10", missed: false },
+  { id: 3, contact: CONTACTS[2], type: "video", direction: "incoming", time: "Вчера, 20:15", duration: "", missed: true },
+  { id: 4, contact: CONTACTS[4], type: "audio", direction: "outgoing", time: "Вчера, 15:30", duration: "28:02", missed: false },
+  { id: 5, contact: CONTACTS[5], type: "video", direction: "incoming", time: "Пн, 18:00", duration: "03:47", missed: false },
+];
+
+const STATUSES = [
+  { id: 1, contact: CONTACTS[0], viewed: false, count: 3, time: "2 мин назад", emoji: "🌸" },
+  { id: 2, contact: CONTACTS[2], viewed: false, count: 1, time: "15 мин назад", emoji: "🎨" },
+  { id: 3, contact: CONTACTS[5], viewed: true, count: 2, time: "1 час назад", emoji: "✨" },
+  { id: 4, contact: CONTACTS[1], viewed: true, count: 1, time: "3 часа назад", emoji: "🚀" },
+];
+
+const MEDIA_ITEMS = [
+  { id: 1, type: "photo", from: CONTACTS[0], color: "from-purple-600 to-pink-600" },
+  { id: 2, type: "photo", from: CONTACTS[2], color: "from-blue-600 to-cyan-600" },
+  { id: 3, type: "video", from: CONTACTS[4], color: "from-green-600 to-teal-600" },
+  { id: 4, type: "photo", from: CONTACTS[5], color: "from-orange-600 to-red-600" },
+  { id: 5, type: "photo", from: CONTACTS[1], color: "from-violet-600 to-purple-600" },
+  { id: 6, type: "voice", from: CONTACTS[3], color: "from-rose-600 to-pink-600" },
+  { id: 7, type: "photo", from: CONTACTS[0], color: "from-cyan-600 to-blue-600" },
+  { id: 8, type: "video", from: CONTACTS[2], color: "from-amber-600 to-orange-600" },
+  { id: 9, type: "photo", from: CONTACTS[5], color: "from-indigo-600 to-violet-600" },
+];
+
+function Avatar({ initials, color, size = "md", online = false }: { initials: string; color: string; size?: "sm" | "md" | "lg" | "xl"; online?: boolean }) {
+  const sizes: Record<string, string> = { sm: "w-8 h-8 text-xs", md: "w-10 h-10 text-sm", lg: "w-12 h-12 text-base", xl: "w-16 h-16 text-lg" };
+  return (
+    <div className={`relative flex-shrink-0`}>
+      <div className={`${sizes[size]} rounded-full bg-gradient-to-br ${color} flex items-center justify-center font-semibold text-white`}>
+        {initials}
+      </div>
+      {online && (
+        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-background" />
+      )}
+    </div>
+  );
+}
+
+function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
+  const [input, setInput] = useState("");
+  const chat = CHATS.find(c => c.id === chatId)!;
+  const messages = MESSAGES[chatId] || [];
+
+  return (
+    <div className="flex flex-col h-full animate-slide-in-right">
+      <div className="glass-strong px-4 py-3 flex items-center gap-3 border-b border-border/50">
+        <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+          <Icon name="ChevronLeft" size={20} />
+        </button>
+        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-sm truncate">{chat.contact.name}</div>
+          <div className="text-xs text-muted-foreground">{chat.contact.online ? "В сети" : chat.contact.status}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
+            <Icon name="Phone" size={18} />
+          </button>
+          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+            <Icon name="Video" size={18} />
+          </button>
+          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+            <Icon name="MoreVertical" size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 mesh-bg">
+        {messages.map((msg, i) => (
+          <div key={msg.id} className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in`} style={{ animationDelay: `${i * 0.05}s` }}>
+            <div className={`max-w-[72%] px-4 py-2.5 shadow-lg ${msg.out ? "msg-bubble-out text-white" : "msg-bubble-in text-foreground"}`}>
+              <p className="text-sm leading-relaxed">{msg.text}</p>
+              <div className={`flex items-center justify-end gap-1 mt-1 ${msg.out ? "text-white/60" : "text-muted-foreground"}`}>
+                <span className="text-[10px]">{msg.time}</span>
+                {msg.out && <Icon name="CheckCheck" size={12} />}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="glass-strong px-4 py-3 border-t border-border/50">
+        <div className="flex items-center gap-2">
+          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-purple transition-colors">
+            <Icon name="Smile" size={20} />
+          </button>
+          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
+            <Icon name="Paperclip" size={20} />
+          </button>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="Написать сообщение..."
+            className="flex-1 bg-muted/50 border border-border/50 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neon-purple/60 transition-colors placeholder:text-muted-foreground"
+          />
+          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
+            <Icon name="Mic" size={20} />
+          </button>
+          <button className={`p-2.5 rounded-xl transition-all ${input ? "gradient-purple-blue text-white glow-purple" : "bg-muted text-muted-foreground"}`}>
+            <Icon name="Send" size={18} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatsTab() {
+  const [openChat, setOpenChat] = useState<number | null>(null);
+  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => setOpenChat(null)} />;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold gradient-text">Сообщения</h1>
+          <div className="flex gap-1">
+            <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+              <Icon name="Search" size={18} />
+            </button>
+            <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+              <Icon name="SquarePen" size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="relative">
+          <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input placeholder="Поиск чатов..." className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground" />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2">
+        {CHATS.map((chat, i) => (
+          <button
+            key={chat.id}
+            onClick={() => setOpenChat(chat.id)}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all group animate-fade-in text-left"
+            style={{ animationDelay: `${i * 0.06}s` }}
+          >
+            <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
+                <span className="text-[11px] text-muted-foreground flex-shrink-0 ml-2">{chat.time}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground truncate">{chat.lastMsg}</span>
+                {chat.unread > 0 && (
+                  <span className="flex-shrink-0 min-w-5 h-5 gradient-purple-blue text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1.5">
+                    {chat.unread}
+                  </span>
+                )}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContactsTab() {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold gradient-text">Контакты</h1>
+          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+            <Icon name="UserPlus" size={18} />
+          </button>
+        </div>
+        <div className="relative">
+          <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input placeholder="Поиск контактов..." className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground" />
+        </div>
+      </div>
+      <div className="px-4 mb-2">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">В сети · {CONTACTS.filter(c => c.online).length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 space-y-1">
+        {CONTACTS.map((contact, i) => (
+          <div key={contact.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all cursor-pointer group animate-fade-in" style={{ animationDelay: `${i * 0.06}s` }}>
+            <Avatar initials={contact.avatar} color={contact.color} online={contact.online} />
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-sm">{contact.name}</div>
+              <div className="text-xs text-muted-foreground">{contact.status}</div>
+            </div>
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-neon-cyan transition-colors">
+                <Icon name="Phone" size={14} />
+              </button>
+              <button className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-neon-purple transition-colors">
+                <Icon name="MessageCircle" size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CallsTab() {
+  const [tab, setTab] = useState<"all" | "missed">("all");
+  const filtered = tab === "missed" ? CALLS.filter(c => c.missed) : CALLS;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold gradient-text">Звонки</h1>
+          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
+            <Icon name="PhoneCall" size={18} />
+          </button>
+        </div>
+        <div className="flex gap-2 bg-muted/50 p-1 rounded-xl">
+          {(["all", "missed"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === t ? "gradient-purple-blue text-white shadow-md" : "text-muted-foreground hover:text-foreground"}`}>
+              {t === "all" ? "Все" : "Пропущенные"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 space-y-1">
+        {filtered.map((call, i) => (
+          <div key={call.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all cursor-pointer group animate-fade-in" style={{ animationDelay: `${i * 0.07}s` }}>
+            <Avatar initials={call.contact.avatar} color={call.contact.color} />
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-sm">{call.contact.name}</div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Icon name={call.direction === "incoming" ? "PhoneIncoming" : "PhoneOutgoing"} size={12} className={call.missed ? "text-destructive" : "text-emerald-500"} />
+                <span className={`text-xs ${call.missed ? "text-destructive" : "text-muted-foreground"}`}>
+                  {call.time}{call.duration && ` · ${call.duration}`}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {call.type === "video" ? <Icon name="Video" size={14} className="text-muted-foreground" /> : <Icon name="Phone" size={14} className="text-muted-foreground" />}
+              <button className="ml-1 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted text-neon-cyan">
+                <Icon name="PhoneCall" size={16} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatusTab() {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 pt-4 pb-2">
+        <h1 className="text-xl font-bold gradient-text mb-4">Статусы</h1>
+        <div className="glass rounded-2xl p-4 mb-4 border border-neon-purple/20">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-14 h-14 rounded-full gradient-purple-blue flex items-center justify-center text-white font-bold text-lg">Я</div>
+              <div className="absolute bottom-0 right-0 w-5 h-5 gradient-cyan-blue rounded-full flex items-center justify-center border-2 border-background">
+                <Icon name="Plus" size={10} className="text-white" />
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-sm">Мой статус</div>
+              <div className="text-xs text-muted-foreground">Добавить статус</div>
+            </div>
+          </div>
+        </div>
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Недавние обновления</div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 space-y-1">
+        {STATUSES.map((status, i) => (
+          <div key={status.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all cursor-pointer animate-fade-in" style={{ animationDelay: `${i * 0.08}s` }}>
+            <div className="relative">
+              <div className={`w-12 h-12 rounded-full p-0.5 ${status.viewed ? "bg-muted" : "bg-gradient-to-br from-purple-500 via-pink-500 to-cyan-500"}`}>
+                <div className={`w-full h-full rounded-full bg-gradient-to-br ${status.contact.color} flex items-center justify-center text-white text-sm font-semibold`}>
+                  {status.contact.avatar}
+                </div>
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 text-base">{status.emoji}</span>
+            </div>
+            <div className="flex-1">
+              <div className="font-semibold text-sm">{status.contact.name}</div>
+              <div className="text-xs text-muted-foreground">{status.time} · {status.count} {status.count === 1 ? "обновление" : "обновления"}</div>
+            </div>
+            {!status.viewed && <div className="w-2 h-2 rounded-full bg-neon-purple" />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MediaTab() {
+  const [filter, setFilter] = useState<"all" | "photo" | "video" | "voice">("all");
+  const filtered = filter === "all" ? MEDIA_ITEMS : MEDIA_ITEMS.filter(m => m.type === filter);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-4 space-y-3">
+        <h1 className="text-xl font-bold gradient-text">Медиа</h1>
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {(["all", "photo", "video", "voice"] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)} className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${filter === f ? "gradient-purple-blue text-white" : "bg-muted/50 text-muted-foreground hover:text-foreground"}`}>
+              {f === "all" && <Icon name="LayoutGrid" size={12} />}
+              {f === "photo" && <Icon name="Image" size={12} />}
+              {f === "video" && <Icon name="Play" size={12} />}
+              {f === "voice" && <Icon name="Mic" size={12} />}
+              {f === "all" ? "Все" : f === "photo" ? "Фото" : f === "video" ? "Видео" : "Аудио"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4">
+        <div className="grid grid-cols-3 gap-2">
+          {filtered.map((item, i) => (
+            <div key={item.id} className={`aspect-square rounded-2xl bg-gradient-to-br ${item.color} flex flex-col items-center justify-center cursor-pointer hover:scale-95 transition-transform animate-scale-in relative overflow-hidden`} style={{ animationDelay: `${i * 0.05}s` }}>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+              {item.type === "video" && <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mb-1"><Icon name="Play" size={14} className="text-white ml-0.5" /></div>}
+              {item.type === "voice" && <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mb-1"><Icon name="Mic" size={14} className="text-white" /></div>}
+              {item.type === "photo" && <Icon name="Image" size={20} className="text-white/70" />}
+              <span className="relative text-[10px] text-white/80 mt-1 font-medium">{item.from.name.split(" ")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileTab() {
+  const features = [
+    { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
+    { icon: "RefreshCw", label: "Синхронизация", desc: "Все устройства", color: "text-blue-400" },
+    { icon: "Bell", label: "Уведомления", desc: "Настроены под вас", color: "text-amber-400" },
+    { icon: "Users", label: "Группы", desc: "Командная работа", color: "text-purple-400" },
+    { icon: "Megaphone", label: "Каналы", desc: "Новости и контент", color: "text-pink-400" },
+    { icon: "Smile", label: "Стикеры", desc: "Пакеты эмодзи", color: "text-cyan-400" },
+  ];
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto">
+      <div className="px-4 pt-6 pb-4">
+        <div className="flex items-center gap-4 mb-5">
+          <div className="relative animate-float">
+            <div className="w-20 h-20 rounded-3xl gradient-purple-blue flex items-center justify-center text-white text-2xl font-bold glow-purple">АС</div>
+            <button className="absolute -bottom-1 -right-1 w-7 h-7 gradient-cyan-blue rounded-xl flex items-center justify-center shadow-lg">
+              <Icon name="Camera" size={13} className="text-white" />
+            </button>
+          </div>
+          <div>
+            <h2 className="text-lg font-bold">Алексей Смирнов</h2>
+            <p className="text-sm text-muted-foreground">+7 (999) 123-45-67</p>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="text-xs text-emerald-400 font-medium">В сети</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass rounded-2xl p-3 mb-4 border border-neon-purple/20">
+          <p className="text-sm text-muted-foreground italic">"На связи всегда 🚀"</p>
+        </div>
+
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Возможности</h3>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {features.map((f, i) => (
+            <div key={f.label} className="glass rounded-2xl p-3 flex items-start gap-2.5 hover:border-neon-purple/30 transition-all cursor-pointer animate-fade-in" style={{ animationDelay: `${i * 0.07}s` }}>
+              <Icon name={f.icon} size={18} className={f.color} />
+              <div className="min-w-0">
+                <div className="text-xs font-semibold truncate">{f.label}</div>
+                <div className="text-[10px] text-muted-foreground truncate">{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button className="w-full py-3 rounded-2xl bg-muted/50 border border-border/50 text-muted-foreground text-sm font-medium hover:bg-muted transition-colors flex items-center justify-center gap-2 mb-2">
+          <Icon name="Settings" size={16} />
+          Настройки
+        </button>
+        <button className="w-full py-3 rounded-2xl text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-2">
+          <Icon name="LogOut" size={16} />
+          Выйти
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
+  { id: "chats", icon: "MessageCircle", label: "Чаты" },
+  { id: "contacts", icon: "Users", label: "Контакты" },
+  { id: "calls", icon: "Phone", label: "Звонки" },
+  { id: "status", icon: "Circle", label: "Статусы" },
+  { id: "media", icon: "Image", label: "Медиа" },
+  { id: "profile", icon: "User", label: "Профиль" },
+];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<Tab>("chats");
+
+  const renderTab = () => {
+    switch (activeTab) {
+      case "chats": return <ChatsTab />;
+      case "contacts": return <ContactsTab />;
+      case "calls": return <CallsTab />;
+      case "status": return <StatusTab />;
+      case "media": return <MediaTab />;
+      case "profile": return <ProfileTab />;
+    }
+  };
+
+  return (
+    <div className="h-screen w-screen mesh-bg flex items-center justify-center overflow-hidden font-golos">
+      <div className="w-full max-w-sm h-full md:h-[820px] md:max-h-screen flex flex-col glass-strong md:rounded-3xl overflow-hidden md:shadow-2xl md:shadow-black/60 relative">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neon-purple/60 to-transparent z-10" />
+
+        <div className="flex-1 overflow-hidden">
+          {renderTab()}
+        </div>
+
+        <div className="glass-strong border-t border-border/50 px-2 py-2">
+          <div className="flex items-center justify-around">
+            {NAV_ITEMS.map(item => {
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex flex-col items-center gap-0.5 px-2.5 py-2 rounded-2xl transition-all duration-200 ${isActive ? "nav-active" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"}`}
+                >
+                  <Icon name={item.icon} size={20} className={isActive ? "text-neon-purple" : ""} />
+                  <span className={`text-[9px] font-medium ${isActive ? "text-neon-purple" : ""}`}>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neon-blue/30 to-transparent" />
+      </div>
+    </div>
+  );
+}
