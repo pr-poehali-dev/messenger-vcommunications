@@ -97,6 +97,29 @@ function getNow() {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
 
+function playNotification() {
+  try {
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    [[880, 0, 0.08], [1100, 0.1, 0.08], [1320, 0.2, 0.1]].forEach(([freq, start, dur]) => {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq as number;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, ctx.currentTime + (start as number));
+      g.gain.linearRampToValueAtTime(0.18, ctx.currentTime + (start as number) + 0.01);
+      g.gain.linearRampToValueAtTime(0, ctx.currentTime + (start as number) + (dur as number));
+      osc.connect(g);
+      g.connect(ctx.destination);
+      osc.start(ctx.currentTime + (start as number));
+      osc.stop(ctx.currentTime + (start as number) + (dur as number));
+    });
+  } catch (e) {
+    void e;
+  }
+}
+
 function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(MESSAGES[chatId] || []);
@@ -119,6 +142,7 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
       const replies = REPLIES[chatId] || ["Ок!", "Понял!", "Спасибо!"];
       const reply = replies[Math.floor(Math.random() * replies.length)];
       setTyping(false);
+      playNotification();
       setMessages(prev => [...prev, { id: newId + 1, text: reply, out: false, time: getNow() }]);
     }, 1200 + Math.random() * 800);
   }
