@@ -21,7 +21,9 @@ const CHATS = [
   { id: 6, contact: CONTACTS[3], lastMsg: "Жду подтверждения", time: "пн", unread: 0 },
 ];
 
-const MESSAGES: Record<number, { id: number; text: string; out: boolean; time: string }[]> = {
+type Message = { id: number; text: string; out: boolean; time: string; voice?: { url: string; duration: number } };
+
+const MESSAGES: Record<number, Message[]> = {
   1: [
     { id: 1, text: "Привет! Как дела с проектом?", out: false, time: "14:20" },
     { id: 2, text: "Всё отлично! Почти закончила дизайн", out: true, time: "14:22" },
@@ -120,16 +122,86 @@ function playNotification() {
   }
 }
 
+function VoiceBubble({ url, duration, out }: { url: string; duration: number; out: boolean }) {
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  function toggle() {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(url);
+      audioRef.current.ontimeupdate = () => {
+        const a = audioRef.current!;
+        setProgress(a.duration ? a.currentTime / a.duration : 0);
+      };
+      audioRef.current.onended = () => { setPlaying(false); setProgress(0); };
+    }
+    if (playing) {
+      audioRef.current.pause();
+      setPlaying(false);
+    } else {
+      audioRef.current.play();
+      setPlaying(true);
+    }
+  }
+
+  const bars = Array.from({ length: 28 }, (_, i) => 3 + Math.abs(Math.sin(i * 0.8 + (url.length % 5))) * 14);
+  const filled = Math.round(progress * bars.length);
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+  return (
+    <div className="flex items-center gap-3 min-w-[180px]">
+      <button
+        onClick={toggle}
+        className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${out ? "bg-white/20 hover:bg-white/30" : "bg-neon-purple/20 hover:bg-neon-purple/30"}`}
+      >
+        <Icon name={playing ? "Pause" : "Play"} size={16} />
+      </button>
+      <div className="flex items-end gap-[2px] flex-1">
+        {bars.map((h, i) => (
+          <div
+            key={i}
+            style={{ height: `${h}px` }}
+            className={`w-[3px] rounded-full transition-colors ${i < filled ? (out ? "bg-white" : "bg-neon-purple") : (out ? "bg-white/40" : "bg-muted-foreground/40")}`}
+          />
+        ))}
+      </div>
+      <span className={`text-[10px] flex-shrink-0 ${out ? "text-white/60" : "text-muted-foreground"}`}>{fmt(duration)}</span>
+    </div>
+  );
+}
+
 function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(MESSAGES[chatId] || []);
   const [typing, setTyping] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chat = CHATS.find(c => c.id === chatId)!;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
+
+  useEffect(() => () => {
+    mediaRecRef.current?.stop();
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  function sendReply(id: number) {
+    setTyping(true);
+    setTimeout(() => {
+      const replies = REPLIES[chatId] || ["Ок!", "Понял!", "Спасибо!"];
+      const reply = replies[Math.floor(Math.random() * replies.length)];
+      setTyping(false);
+      playNotification();
+      setMessages(prev => [...prev, { id: id + 1, text: reply, out: false, time: getNow() }]);
+    }, 1200 + Math.random() * 800);
+  }
 
   function sendMessage() {
     const text = input.trim();
@@ -137,15 +209,51 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
     const newId = Date.now();
     setMessages(prev => [...prev, { id: newId, text, out: true, time: getNow() }]);
     setInput("");
-    setTyping(true);
-    setTimeout(() => {
-      const replies = REPLIES[chatId] || ["Ок!", "Понял!", "Спасибо!"];
-      const reply = replies[Math.floor(Math.random() * replies.length)];
-      setTyping(false);
-      playNotification();
-      setMessages(prev => [...prev, { id: newId + 1, text: reply, out: false, time: getNow() }]);
-    }, 1200 + Math.random() * 800);
+    sendReply(newId);
   }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        const dur = recSeconds || 1;
+        const newId = Date.now();
+        setMessages(prev => [...prev, { id: newId, text: "", out: true, time: getNow(), voice: { url, duration: dur } }]);
+        setRecording(false);
+        setRecSeconds(0);
+        sendReply(newId);
+      };
+      mr.start();
+      mediaRecRef.current = mr;
+      setRecording(true);
+      setRecSeconds(0);
+      timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+    } catch (e) { void e; }
+  }
+
+  function stopRecording() {
+    mediaRecRef.current?.stop();
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  }
+
+  function cancelRecording() {
+    if (mediaRecRef.current) {
+      mediaRecRef.current.onstop = null;
+      mediaRecRef.current.stop();
+      mediaRecRef.current.stream?.getTracks().forEach(t => t.stop());
+    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    setRecording(false);
+    setRecSeconds(0);
+  }
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   return (
     <div className="flex flex-col h-full animate-slide-in-right">
@@ -177,7 +285,10 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
         {messages.map((msg, i) => (
           <div key={msg.id} className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in`} style={{ animationDelay: `${i * 0.05}s` }}>
             <div className={`max-w-[72%] px-4 py-2.5 shadow-lg ${msg.out ? "msg-bubble-out text-white" : "msg-bubble-in text-foreground"}`}>
-              <p className="text-sm leading-relaxed">{msg.text}</p>
+              {msg.voice
+                ? <VoiceBubble url={msg.voice.url} duration={msg.voice.duration} out={msg.out} />
+                : <p className="text-sm leading-relaxed">{msg.text}</p>
+              }
               <div className={`flex items-center justify-end gap-1 mt-1 ${msg.out ? "text-white/60" : "text-muted-foreground"}`}>
                 <span className="text-[10px]">{msg.time}</span>
                 {msg.out && <Icon name="CheckCheck" size={12} />}
@@ -198,30 +309,49 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
       </div>
 
       <div className="glass-strong px-4 py-3 border-t border-border/50">
-        <div className="flex items-center gap-2">
-          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-purple transition-colors">
-            <Icon name="Smile" size={20} />
-          </button>
-          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
-            <Icon name="Paperclip" size={20} />
-          </button>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && sendMessage()}
-            placeholder="Написать сообщение..."
-            className="flex-1 bg-muted/50 border border-border/50 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neon-purple/60 transition-colors placeholder:text-muted-foreground"
-          />
-          <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
-            <Icon name="Mic" size={20} />
-          </button>
-          <button
-            onClick={sendMessage}
-            className={`p-2.5 rounded-xl transition-all ${input.trim() ? "gradient-purple-blue text-white glow-purple" : "bg-muted text-muted-foreground"}`}
-          >
-            <Icon name="Send" size={18} />
-          </button>
-        </div>
+        {recording ? (
+          <div className="flex items-center gap-3">
+            <button onClick={cancelRecording} className="p-2 rounded-xl text-red-400 hover:bg-red-500/10 transition-colors">
+              <Icon name="X" size={20} />
+            </button>
+            <div className="flex-1 flex items-center gap-2 bg-muted/50 border border-red-500/40 rounded-2xl px-4 py-2.5">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+              <span className="text-sm text-red-400 font-medium">{fmt(recSeconds)}</span>
+              <span className="text-xs text-muted-foreground ml-1">Запись...</span>
+            </div>
+            <button
+              onClick={stopRecording}
+              className="p-2.5 rounded-xl gradient-purple-blue text-white glow-purple transition-all"
+            >
+              <Icon name="Send" size={18} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-purple transition-colors">
+              <Icon name="Smile" size={20} />
+            </button>
+            <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
+              <Icon name="Paperclip" size={20} />
+            </button>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendMessage()}
+              placeholder="Написать сообщение..."
+              className="flex-1 bg-muted/50 border border-border/50 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neon-purple/60 transition-colors placeholder:text-muted-foreground"
+            />
+            {input.trim() ? (
+              <button onClick={sendMessage} className="p-2.5 rounded-xl gradient-purple-blue text-white glow-purple transition-all">
+                <Icon name="Send" size={18} />
+              </button>
+            ) : (
+              <button onClick={startRecording} className="p-2.5 rounded-xl bg-muted text-muted-foreground hover:text-neon-purple hover:bg-neon-purple/10 transition-all">
+                <Icon name="Mic" size={20} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
