@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
@@ -83,10 +83,45 @@ function Avatar({ initials, color, size = "md", online = false }: { initials: st
   );
 }
 
+const REPLIES: Record<number, string[]> = {
+  1: ["Отлично, жду!", "Хорошо, спасибо!", "Увидимся 😊", "Договорились!", "Супер, пиши если что"],
+  2: ["Понял, принял 👍", "Ок, скоро отвечу", "Договорились!", "Отлично, спасибо!", "Хорошо!"],
+  3: ["Спасибо!", "Хорошо, гляну", "Ок!", "Поняла, спасибо 🙏", "Договорились"],
+  4: ["Ок", "Хорошо!", "Понял", "Договорились!", "Буду ждать"],
+  5: ["Пожалуйста 😊", "Всегда рада помочь!", "Удачи!", "Отлично!", "Ок!"],
+  6: ["Жду 👌", "Хорошо!", "Ок, понял", "Договорились", "Спасибо!"],
+};
+
+function getNow() {
+  const d = new Date();
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
+
 function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   const [input, setInput] = useState("");
+  const [messages, setMessages] = useState(MESSAGES[chatId] || []);
+  const [typing, setTyping] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const chat = CHATS.find(c => c.id === chatId)!;
-  const messages = MESSAGES[chatId] || [];
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typing]);
+
+  function sendMessage() {
+    const text = input.trim();
+    if (!text) return;
+    const newId = Date.now();
+    setMessages(prev => [...prev, { id: newId, text, out: true, time: getNow() }]);
+    setInput("");
+    setTyping(true);
+    setTimeout(() => {
+      const replies = REPLIES[chatId] || ["Ок!", "Понял!", "Спасибо!"];
+      const reply = replies[Math.floor(Math.random() * replies.length)];
+      setTyping(false);
+      setMessages(prev => [...prev, { id: newId + 1, text: reply, out: false, time: getNow() }]);
+    }, 1200 + Math.random() * 800);
+  }
 
   return (
     <div className="flex flex-col h-full animate-slide-in-right">
@@ -97,7 +132,9 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
         <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-sm truncate">{chat.contact.name}</div>
-          <div className="text-xs text-muted-foreground">{chat.contact.online ? "В сети" : chat.contact.status}</div>
+          <div className="text-xs text-muted-foreground">
+            {typing ? <span className="text-neon-purple animate-pulse">печатает...</span> : (chat.contact.online ? "В сети" : chat.contact.status)}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
@@ -124,6 +161,16 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
             </div>
           </div>
         ))}
+        {typing && (
+          <div className="flex justify-start animate-fade-in">
+            <div className="msg-bubble-in px-4 py-3 shadow-lg flex gap-1 items-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
       </div>
 
       <div className="glass-strong px-4 py-3 border-t border-border/50">
@@ -137,13 +184,17 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && sendMessage()}
             placeholder="Написать сообщение..."
             className="flex-1 bg-muted/50 border border-border/50 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neon-purple/60 transition-colors placeholder:text-muted-foreground"
           />
           <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
             <Icon name="Mic" size={20} />
           </button>
-          <button className={`p-2.5 rounded-xl transition-all ${input ? "gradient-purple-blue text-white glow-purple" : "bg-muted text-muted-foreground"}`}>
+          <button
+            onClick={sendMessage}
+            className={`p-2.5 rounded-xl transition-all ${input.trim() ? "gradient-purple-blue text-white glow-purple" : "bg-muted text-muted-foreground"}`}
+          >
             <Icon name="Send" size={18} />
           </button>
         </div>
