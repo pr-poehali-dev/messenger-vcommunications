@@ -443,8 +443,152 @@ const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: "profile", icon: "User", label: "Профиль" },
 ];
 
+type IncomingCall = {
+  contact: typeof CONTACTS[0];
+  type: "audio" | "video";
+};
+
+function IncomingCallScreen({ call, onAccept, onDecline }: { call: IncomingCall; onAccept: () => void; onDecline: () => void }) {
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-between py-16 px-8 animate-fade-in" style={{ background: "linear-gradient(160deg, hsl(258 85% 10%) 0%, hsl(222 25% 5%) 50%, hsl(210 100% 8%) 100%)" }}>
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.15) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite" }} />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.12) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite 0.6s" }} />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.1) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite 1.2s" }} />
+      </div>
+
+      <div className="text-center z-10 mt-4">
+        <p className="text-sm text-muted-foreground mb-1 tracking-widest uppercase font-medium">
+          {call.type === "video" ? "Входящий видеозвонок" : "Входящий звонок"}
+        </p>
+        <h2 className="text-3xl font-bold text-white mb-1">{call.contact.name}</h2>
+        <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+          <Icon name={call.type === "video" ? "Video" : "Phone"} size={14} />
+          <span className="animate-pulse">Звонит...</span>
+        </div>
+      </div>
+
+      <div className="relative z-10">
+        <div className={`w-28 h-28 rounded-full bg-gradient-to-br ${call.contact.color} flex items-center justify-center text-white text-4xl font-bold shadow-2xl animate-pulse-glow`}>
+          {call.contact.avatar}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-14 z-10">
+        <div className="flex flex-col items-center gap-2">
+          <button
+            onClick={onDecline}
+            className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-red-500/40"
+          >
+            <Icon name="PhoneOff" size={26} className="text-white" />
+          </button>
+          <span className="text-xs text-muted-foreground">Отклонить</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-2">
+          <button
+            onClick={onAccept}
+            className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-emerald-500/40 animate-pulse-glow"
+            style={{ boxShadow: "0 0 20px hsl(142 71% 45% / 0.6), 0 0 40px hsl(142 71% 45% / 0.3)" }}
+          >
+            <Icon name={call.type === "video" ? "Video" : "Phone"} size={26} className="text-white" />
+          </button>
+          <span className="text-xs text-muted-foreground">Принять</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActiveCallScreen({ call, onEnd }: { call: IncomingCall; onEnd: () => void }) {
+  const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const [camOff, setCamOff] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  useState(() => {
+    const timer = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(timer);
+  });
+
+  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col animate-fade-in" style={{ background: "linear-gradient(160deg, hsl(185 100% 8%) 0%, hsl(222 25% 5%) 50%, hsl(258 85% 8%) 100%)" }}>
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full" style={{ background: "radial-gradient(circle, hsl(185 100% 55% / 0.08) 0%, transparent 70%)" }} />
+        <div className="absolute -bottom-20 -left-20 w-64 h-64 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.08) 0%, transparent 70%)" }} />
+      </div>
+
+      <div className="flex items-center justify-between px-5 pt-5 z-10">
+        <button className="p-2 rounded-xl hover:bg-white/10 transition-colors text-white/60 hover:text-white">
+          <Icon name="ChevronDown" size={22} />
+        </button>
+        <div className="text-center">
+          <p className="text-white/60 text-xs uppercase tracking-widest">{call.type === "video" ? "Видеозвонок" : "Аудиозвонок"}</p>
+          <p className="text-emerald-400 font-semibold text-sm font-mono">{fmt(elapsed)}</p>
+        </div>
+        <button className="p-2 rounded-xl hover:bg-white/10 transition-colors text-white/60 hover:text-white">
+          <Icon name="MoreHorizontal" size={22} />
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center z-10 gap-4">
+        <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${call.contact.color} flex items-center justify-center text-white text-4xl font-bold shadow-2xl`}>
+          {call.contact.avatar}
+        </div>
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-white">{call.contact.name}</h2>
+          <p className="text-white/50 text-sm mt-1">
+            {call.contact.online ? "В сети" : call.contact.status}
+          </p>
+        </div>
+      </div>
+
+      <div className="px-8 pb-12 z-10">
+        <div className="flex items-center justify-center gap-4 mb-8">
+          <button onClick={() => setMuted(m => !m)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${muted ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
+            <Icon name={muted ? "MicOff" : "Mic"} size={20} />
+            <span className="text-[9px]">{muted ? "Вкл. микр." : "Микрофон"}</span>
+          </button>
+          {call.type === "video" && (
+            <button onClick={() => setCamOff(c => !c)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${camOff ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
+              <Icon name={camOff ? "VideoOff" : "Video"} size={20} />
+              <span className="text-[9px]">{camOff ? "Вкл. камеру" : "Камера"}</span>
+            </button>
+          )}
+          <button onClick={() => setSpeakerOn(s => !s)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${speakerOn ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
+            <Icon name={speakerOn ? "Volume2" : "VolumeX"} size={20} />
+            <span className="text-[9px]">{speakerOn ? "Динамик" : "Без звука"}</span>
+          </button>
+        </div>
+
+        <button
+          onClick={onEnd}
+          className="w-full py-4 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/30"
+        >
+          <Icon name="PhoneOff" size={22} className="text-white" />
+          <span className="text-white font-semibold">Завершить звонок</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("chats");
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>({
+    contact: CONTACTS[0],
+    type: "video",
+  });
+  const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
+
+  const handleAccept = () => {
+    setActiveCall(incomingCall);
+    setIncomingCall(null);
+  };
+  const handleDecline = () => setIncomingCall(null);
+  const handleEndCall = () => setActiveCall(null);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -485,6 +629,13 @@ export default function App() {
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neon-blue/30 to-transparent" />
+
+        {incomingCall && (
+          <IncomingCallScreen call={incomingCall} onAccept={handleAccept} onDecline={handleDecline} />
+        )}
+        {activeCall && (
+          <ActiveCallScreen call={activeCall} onEnd={handleEndCall} />
+        )}
       </div>
     </div>
   );
