@@ -495,11 +495,12 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
 
 type PinPadMode = "enter" | "set" | "confirm";
 
-function PinPad({ mode, onSuccess, onCancel, existingPin }: {
+function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   mode: PinPadMode;
   onSuccess: (pin?: string) => void;
   onCancel: () => void;
   existingPin?: string;
+  title?: string;
 }) {
   const [digits, setDigits] = useState("");
   const [confirmDigits, setConfirmDigits] = useState("");
@@ -508,9 +509,9 @@ function PinPad({ mode, onSuccess, onCancel, existingPin }: {
   const [shake, setShake] = useState(false);
 
   const current = step === "confirm" ? confirmDigits : digits;
-  const title = mode === "enter"
+  const title = titleProp ?? (mode === "enter"
     ? "Введите пин-код"
-    : step === "confirm" ? "Повторите пин-код" : "Создайте пин-код";
+    : step === "confirm" ? "Повторите пин-код" : "Создайте пин-код");
 
   function doShake(msg: string) {
     setError(msg);
@@ -1259,7 +1260,7 @@ export default function App() {
   });
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
   const [globalPin, setGlobalPin] = useState<string | null>(null);
-  const [pinPadApp, setPinPadApp] = useState<null | { mode: "confirm"; resolve: (pin: string) => void }>(null);
+  const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
 
   const handleAccept = () => {
     setActiveCall(incomingCall);
@@ -1269,10 +1270,34 @@ export default function App() {
   const handleEndCall = () => setActiveCall(null);
 
   function requestSetPin() {
-    setPinPadApp({ mode: "confirm", resolve: (pin) => { setGlobalPin(pin); setPinPadApp(null); } });
+    if (globalPin) {
+      setPinPadApp({
+        mode: "enter",
+        resolve: (entered) => {
+          if (entered !== globalPin) return;
+          setPinPadApp({
+            mode: "confirm",
+            resolve: (newPin) => { setGlobalPin(newPin); setPinPadApp(null); },
+          });
+        },
+      });
+    } else {
+      setPinPadApp({ mode: "confirm", resolve: (pin) => { setGlobalPin(pin); setPinPadApp(null); } });
+    }
   }
 
-  function removePin() { setGlobalPin(null); }
+  function removePin() {
+    if (globalPin) {
+      setPinPadApp({
+        mode: "enter",
+        resolve: (entered) => {
+          if (entered !== globalPin) return;
+          setGlobalPin(null);
+          setPinPadApp(null);
+        },
+      });
+    }
+  }
 
   const renderTab = () => {
     switch (activeTab) {
@@ -1317,7 +1342,9 @@ export default function App() {
         {pinPadApp && (
           <PinPad
             mode={pinPadApp.mode}
-            onSuccess={(pin) => pin && pinPadApp.resolve(pin)}
+            existingPin={globalPin ?? undefined}
+            title={pinPadApp.mode === "enter" ? "Введите текущий пин-код" : undefined}
+            onSuccess={(pin) => { if (pin) pinPadApp.resolve(pin); }}
             onCancel={() => setPinPadApp(null)}
           />
         )}
