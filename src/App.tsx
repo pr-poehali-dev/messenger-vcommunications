@@ -1011,6 +1011,58 @@ function MediaTab() {
   );
 }
 
+type PrivacyLevel = "all" | "contacts" | "nobody";
+
+function PrivacyRow({ icon, label, value, onChange }: {
+  icon: string;
+  label: string;
+  value: PrivacyLevel;
+  onChange: (v: PrivacyLevel) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const labels: Record<PrivacyLevel, string> = { all: "Все", contacts: "Контакты", nobody: "Никто" };
+
+  useEffect(() => {
+    if (!open) return;
+    function close(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative flex items-center gap-3 px-4 py-3.5 border-b border-border/30 last:border-0">
+      <div className="w-8 h-8 rounded-xl bg-muted/50 flex items-center justify-center flex-shrink-0">
+        <Icon name={icon} size={16} className="text-muted-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold">{label}</div>
+      </div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium"
+      >
+        {labels[value]}
+        <Icon name="ChevronDown" size={12} className="text-muted-foreground" />
+      </button>
+      {open && (
+        <div className="absolute right-4 top-full mt-1 z-50 glass-strong border border-border/60 rounded-xl overflow-hidden shadow-xl animate-fade-in min-w-[130px]">
+          {(["all", "contacts", "nobody"] as PrivacyLevel[]).map(opt => (
+            <button
+              key={opt}
+              onClick={() => { onChange(opt); setOpen(false); }}
+              className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left ${value === opt ? "text-neon-purple font-medium" : ""}`}
+            >
+              {labels[opt]}
+              {value === opt && <Icon name="Check" size={13} className="text-neon-purple" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus }: {
   globalPin: string | null;
   onChangePin: () => void;
@@ -1018,6 +1070,10 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
   hideOnlineStatus: boolean;
   onToggleOnlineStatus: () => void;
 }) {
+  const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
+  const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
+  const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
+
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
     { icon: "RefreshCw", label: "Синхронизация", desc: "Все устройства", color: "text-blue-400" },
@@ -1102,6 +1158,13 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
               </button>
             )}
           </div>
+        </div>
+
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Кто может</h3>
+        <div className="glass rounded-2xl border border-border/40 overflow-hidden mb-4">
+          <PrivacyRow icon="ImageIcon" label="Видеть аватар" value={avatarPrivacy} onChange={setAvatarPrivacy} />
+          <PrivacyRow icon="MessageCircle" label="Писать мне" value={messagePrivacy} onChange={setMessagePrivacy} />
+          <PrivacyRow icon="Phone" label="Звонить мне" value={callPrivacy} onChange={setCallPrivacy} />
         </div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Возможности</h3>
