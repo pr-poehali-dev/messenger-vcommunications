@@ -357,9 +357,120 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   );
 }
 
+function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
+  chat: typeof CHATS[0];
+  onOpen: () => void;
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  archived?: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function close(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false); }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+
+  return (
+    <div ref={ref} className="relative group animate-fade-in">
+      <button
+        onClick={onOpen}
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left"
+      >
+        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
+            <span className="text-[11px] text-muted-foreground flex-shrink-0 ml-2">{chat.time}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground truncate">{chat.lastMsg}</span>
+            {!archived && chat.unread > 0 && (
+              <span className="flex-shrink-0 min-w-5 h-5 gradient-purple-blue text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1.5">
+                {chat.unread}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+      <button
+        onClick={() => setMenuOpen(v => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-muted transition-all text-muted-foreground"
+      >
+        <Icon name="MoreVertical" size={15} />
+      </button>
+      {menuOpen && (
+        <div className="absolute right-2 top-full mt-1 z-50 glass-strong border border-border/60 rounded-xl overflow-hidden shadow-xl animate-fade-in min-w-[160px]">
+          <button
+            onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+          >
+            <Icon name={archived ? "ArchiveRestore" : "Archive"} size={15} className="text-muted-foreground" />
+            {archived ? "Восстановить" : "В архив"}
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); onOpen(); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+          >
+            <Icon name="MessageCircle" size={15} className="text-muted-foreground" />
+            Открыть чат
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatsTab() {
   const [openChat, setOpenChat] = useState<number | null>(null);
+  const [archived, setArchived] = useState<number[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
+
   if (openChat !== null) return <ChatView chatId={openChat} onBack={() => setOpenChat(null)} />;
+
+  const activeChats = CHATS.filter(c => !archived.includes(c.id));
+  const archivedChats = CHATS.filter(c => archived.includes(c.id));
+
+  function archiveChat(id: number) { setArchived(prev => [...prev, id]); }
+  function unarchiveChat(id: number) { setArchived(prev => prev.filter(x => x !== id)); }
+
+  if (showArchive) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="px-4 py-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowArchive(false)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+              <Icon name="ChevronLeft" size={20} />
+            </button>
+            <h1 className="text-xl font-bold gradient-text flex-1">Архив</h1>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2">
+          {archivedChats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
+              <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
+                <Icon name="Archive" size={24} className="text-muted-foreground" />
+              </div>
+              <p className="text-sm text-muted-foreground">Архив пустой</p>
+            </div>
+          ) : (
+            archivedChats.map(chat => (
+              <ChatRow
+                key={chat.id}
+                chat={chat}
+                onOpen={() => setOpenChat(chat.id)}
+                onUnarchive={() => unarchiveChat(chat.id)}
+                archived
+              />
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -381,29 +492,28 @@ function ChatsTab() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2">
-        {CHATS.map((chat, i) => (
+        {archivedChats.length > 0 && (
           <button
-            key={chat.id}
-            onClick={() => setOpenChat(chat.id)}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all group animate-fade-in text-left"
-            style={{ animationDelay: `${i * 0.06}s` }}
+            onClick={() => setShowArchive(true)}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left mb-1 animate-fade-in"
           >
-            <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
-                <span className="text-[11px] text-muted-foreground flex-shrink-0 ml-2">{chat.time}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground truncate">{chat.lastMsg}</span>
-                {chat.unread > 0 && (
-                  <span className="flex-shrink-0 min-w-5 h-5 gradient-purple-blue text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1.5">
-                    {chat.unread}
-                  </span>
-                )}
-              </div>
+            <div className="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center flex-shrink-0">
+              <Icon name="Archive" size={18} className="text-muted-foreground" />
             </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-sm">Архив</span>
+              <div className="text-xs text-muted-foreground">{archivedChats.length} {archivedChats.length === 1 ? "чат" : "чата"}</div>
+            </div>
+            <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
           </button>
+        )}
+        {activeChats.map((chat, i) => (
+          <ChatRow
+            key={chat.id}
+            chat={chat}
+            onOpen={() => setOpenChat(chat.id)}
+            onArchive={() => archiveChat(chat.id)}
+          />
         ))}
       </div>
     </div>
