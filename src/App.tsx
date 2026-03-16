@@ -357,7 +357,7 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   );
 }
 
-function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted, onPin, onMute }: {
+function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted, onPin, onMute, locked, onLock }: {
   chat: typeof CHATS[0];
   onOpen: () => void;
   onArchive?: () => void;
@@ -367,6 +367,8 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
   muted?: boolean;
   onPin?: () => void;
   onMute?: () => void;
+  locked?: boolean;
+  onLock?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pressing, setPressing] = useState(false);
@@ -410,12 +412,19 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
         className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-all text-left select-none ${pressing ? "scale-[0.97] bg-muted/60" : "hover:bg-muted/40"}`}
         style={{ transition: pressing ? "transform 0.1s, background 0.1s" : "transform 0.2s, background 0.2s" }}
       >
-        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
+        <div className="relative flex-shrink-0">
+          <Avatar initials={locked ? "АМ" : chat.contact.avatar} color={locked ? "from-slate-500 to-slate-600" : chat.contact.color} online={!locked && chat.contact.online} />
+          {locked && (
+            <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-neon-purple flex items-center justify-center border border-background">
+              <Icon name="Lock" size={9} className="text-white" />
+            </span>
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-0.5">
             <div className="flex items-center gap-1.5 min-w-0">
               {pinned && <Icon name="Pin" size={11} className="text-neon-purple flex-shrink-0" />}
-              <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
+              <span className="font-semibold text-sm truncate">{locked ? "Закрытый чат" : chat.contact.name}</span>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
               {muted && <Icon name="BellOff" size={11} className="text-muted-foreground" />}
@@ -463,6 +472,13 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
             <Icon name={muted ? "Bell" : "BellOff"} size={15} className="text-muted-foreground" />
             {muted ? "Включить звук" : "Заглушить"}
           </button>
+          <button
+            onClick={() => { setMenuOpen(false); onLock?.(); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+          >
+            <Icon name={locked ? "LockOpen" : "Lock"} size={15} className="text-muted-foreground" />
+            {locked ? "Снять блокировку" : "Закрыть чат"}
+          </button>
           <div className="border-t border-border/40" />
           <button
             onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
@@ -477,28 +493,170 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
   );
 }
 
+type PinPadMode = "enter" | "set" | "confirm";
+
+function PinPad({ mode, onSuccess, onCancel, existingPin }: {
+  mode: PinPadMode;
+  onSuccess: (pin?: string) => void;
+  onCancel: () => void;
+  existingPin?: string;
+}) {
+  const [digits, setDigits] = useState("");
+  const [confirmDigits, setConfirmDigits] = useState("");
+  const [step, setStep] = useState<"first" | "confirm">("first");
+  const [error, setError] = useState("");
+  const [shake, setShake] = useState(false);
+
+  const current = step === "confirm" ? confirmDigits : digits;
+  const title = mode === "enter"
+    ? "Введите пин-код"
+    : step === "confirm" ? "Повторите пин-код" : "Создайте пин-код";
+
+  function doShake(msg: string) {
+    setError(msg);
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
+  }
+
+  function press(d: string) {
+    if (current.length >= 4) return;
+    const next = current + d;
+    if (step === "first") setDigits(next);
+    else setConfirmDigits(next);
+
+    if (next.length === 4) {
+      setTimeout(() => submit(next), 120);
+    }
+  }
+
+  function submit(val: string) {
+    if (mode === "enter") {
+      if (val === existingPin) { onSuccess(); }
+      else { doShake("Неверный пин-код"); setDigits(""); }
+    } else if (mode === "set") {
+      if (step === "first") { setStep("confirm"); setConfirmDigits(""); setError(""); }
+    } else if (mode === "confirm") {
+      if (step === "first") { setStep("confirm"); setConfirmDigits(""); setError(""); }
+      else {
+        if (val === digits) { onSuccess(digits); }
+        else { doShake("Пин-коды не совпадают"); setConfirmDigits(""); setStep("first"); setDigits(""); }
+      }
+    }
+  }
+
+  function del() {
+    if (step === "confirm") setConfirmDigits(p => p.slice(0, -1));
+    else setDigits(p => p.slice(0, -1));
+  }
+
+  const len = current.length;
+
+  return (
+    <div className="absolute inset-0 z-40 flex flex-col items-center justify-between py-12 px-6 animate-fade-in"
+      style={{ background: "linear-gradient(160deg, hsl(258 85% 8%) 0%, hsl(222 25% 5%) 60%, hsl(210 100% 7%) 100%)" }}>
+      <div className="flex flex-col items-center gap-2 mt-4">
+        <div className="w-14 h-14 rounded-2xl gradient-purple-blue flex items-center justify-center glow-purple mb-2">
+          <Icon name="Lock" size={24} className="text-white" />
+        </div>
+        <h2 className="text-xl font-bold text-white">{title}</h2>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+      </div>
+
+      <div className={`flex gap-5 ${shake ? "animate-bounce" : ""}`}>
+        {[0,1,2,3].map(i => (
+          <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${i < len ? "border-neon-purple bg-neon-purple glow-purple scale-110" : "border-muted-foreground/40 bg-transparent"}`} />
+        ))}
+      </div>
+
+      <div className="w-full max-w-[260px]">
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          {["1","2","3","4","5","6","7","8","9"].map(d => (
+            <button key={d} onClick={() => press(d)}
+              className="h-14 rounded-2xl bg-white/5 border border-white/10 text-white text-xl font-semibold hover:bg-white/10 active:scale-95 transition-all">
+              {d}
+            </button>
+          ))}
+          <button onClick={onCancel}
+            className="h-14 rounded-2xl text-muted-foreground text-sm hover:bg-white/5 transition-all">
+            Отмена
+          </button>
+          <button onClick={() => press("0")}
+            className="h-14 rounded-2xl bg-white/5 border border-white/10 text-white text-xl font-semibold hover:bg-white/10 active:scale-95 transition-all">
+            0
+          </button>
+          <button onClick={del}
+            className="h-14 rounded-2xl text-muted-foreground hover:bg-white/5 transition-all flex items-center justify-center">
+            <Icon name="Delete" size={20} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatsTab() {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
   const [muted, setMuted] = useState<number[]>([]);
+  const [locked, setLocked] = useState<number[]>([]);
+  const [globalPin, setGlobalPin] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
+  const [showLocked, setShowLocked] = useState(false);
+  const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
+  const [unlockedSession, setUnlockedSession] = useState(false);
 
-  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => setOpenChat(null)} />;
+  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} />;
 
   const activeChats = CHATS
-    .filter(c => !archived.includes(c.id))
-    .sort((a, b) => {
-      const ap = pinned.includes(a.id) ? 0 : 1;
-      const bp = pinned.includes(b.id) ? 0 : 1;
-      return ap - bp;
-    });
+    .filter(c => !archived.includes(c.id) && !locked.includes(c.id))
+    .sort((a, b) => (pinned.includes(a.id) ? 0 : 1) - (pinned.includes(b.id) ? 0 : 1));
   const archivedChats = CHATS.filter(c => archived.includes(c.id));
+  const lockedChats = CHATS.filter(c => locked.includes(c.id));
 
   function archiveChat(id: number) { setArchived(prev => [...prev, id]); }
   function unarchiveChat(id: number) { setArchived(prev => prev.filter(x => x !== id)); }
   function togglePin(id: number) { setPinned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
   function toggleMute(id: number) { setMuted(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
+
+  function requestLock(chatId: number) {
+    if (!globalPin) {
+      setPinPad({ mode: "confirm", chatId, action: "lock" });
+    } else {
+      setLocked(prev => [...prev, chatId]);
+    }
+  }
+
+  function requestUnlock(chatId: number) {
+    setPinPad({ mode: "enter", chatId, action: "unlock" });
+  }
+
+  function requestOpenLocked(chatId: number) {
+    if (unlockedSession) { setOpenChat(chatId); return; }
+    setPinPad({ mode: "enter", chatId, action: "open" });
+  }
+
+  function requestViewLocked() {
+    if (unlockedSession) { setShowLocked(true); return; }
+    setPinPad({ mode: "enter", action: "view" });
+  }
+
+  function onPinSuccess(pin?: string) {
+    if (!pinPad) return;
+    if (pinPad.mode === "confirm" && pin) {
+      setGlobalPin(pin);
+      if (pinPad.chatId) setLocked(prev => [...prev, pinPad.chatId!]);
+    } else if (pinPad.action === "unlock" && pinPad.chatId) {
+      setLocked(prev => prev.filter(x => x !== pinPad.chatId));
+    } else if (pinPad.action === "open" && pinPad.chatId) {
+      setUnlockedSession(true);
+      setOpenChat(pinPad.chatId);
+    } else if (pinPad.action === "view") {
+      setUnlockedSession(true);
+      setShowLocked(true);
+    }
+    setPinPad(null);
+  }
 
   if (showArchive) {
     return (
@@ -537,8 +695,64 @@ function ChatsTab() {
     );
   }
 
+  if (showLocked) {
+    return (
+      <div className="relative flex flex-col h-full">
+        {pinPad && (
+          <PinPad
+            mode={pinPad.mode}
+            existingPin={globalPin ?? undefined}
+            onSuccess={onPinSuccess}
+            onCancel={() => setPinPad(null)}
+          />
+        )}
+        <div className="px-4 py-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setShowLocked(false); setUnlockedSession(false); }} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+              <Icon name="ChevronLeft" size={20} />
+            </button>
+            <h1 className="text-xl font-bold gradient-text flex-1">Закрытые чаты</h1>
+            <div className="w-6 h-6 rounded-full bg-neon-purple/20 flex items-center justify-center">
+              <Icon name="Lock" size={12} className="text-neon-purple" />
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2">
+          {lockedChats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
+              <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
+                <Icon name="Lock" size={24} className="text-muted-foreground" />
+              </div>
+              <p className="text-sm text-muted-foreground">Нет закрытых чатов</p>
+            </div>
+          ) : (
+            lockedChats.map(chat => (
+              <ChatRow
+                key={chat.id}
+                chat={chat}
+                onOpen={() => setOpenChat(chat.id)}
+                onMute={() => toggleMute(chat.id)}
+                onLock={() => requestUnlock(chat.id)}
+                muted={muted.includes(chat.id)}
+                locked
+              />
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
+      {pinPad && (
+        <PinPad
+          mode={pinPad.mode}
+          existingPin={globalPin ?? undefined}
+          onSuccess={onPinSuccess}
+          onCancel={() => setPinPad(null)}
+        />
+      )}
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold gradient-text">Сообщения</h1>
@@ -557,6 +771,21 @@ function ChatsTab() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2">
+        {lockedChats.length > 0 && (
+          <button
+            onClick={requestViewLocked}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left mb-1 animate-fade-in"
+          >
+            <div className="w-10 h-10 rounded-full bg-neon-purple/10 border border-neon-purple/20 flex items-center justify-center flex-shrink-0">
+              <Icon name="Lock" size={18} className="text-neon-purple" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-sm">Закрытые чаты</span>
+              <div className="text-xs text-muted-foreground">{lockedChats.length} {lockedChats.length === 1 ? "чат" : "чата"} · защищено пин-кодом</div>
+            </div>
+            <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
+          </button>
+        )}
         {archivedChats.length > 0 && (
           <button
             onClick={() => setShowArchive(true)}
@@ -586,6 +815,7 @@ function ChatsTab() {
                 onArchive={() => archiveChat(chat.id)}
                 onPin={() => togglePin(chat.id)}
                 onMute={() => toggleMute(chat.id)}
+                onLock={() => requestLock(chat.id)}
                 pinned
                 muted={muted.includes(chat.id)}
               />
@@ -601,6 +831,7 @@ function ChatsTab() {
             onArchive={() => archiveChat(chat.id)}
             onPin={() => togglePin(chat.id)}
             onMute={() => toggleMute(chat.id)}
+            onLock={() => requestLock(chat.id)}
             pinned={false}
             muted={muted.includes(chat.id)}
           />
