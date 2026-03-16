@@ -365,7 +365,9 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
   archived?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pressing, setPressing] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -374,11 +376,35 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
 
+  function handlePointerDown() {
+    setPressing(true);
+    longPressTimer.current = setTimeout(() => {
+      setPressing(false);
+      setMenuOpen(true);
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 500);
+  }
+
+  function handlePointerUp() {
+    setPressing(false);
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  }
+
+  function handleClick() {
+    if (menuOpen) return;
+    onOpen();
+  }
+
   return (
     <div ref={ref} className="relative group animate-fade-in">
       <button
-        onClick={onOpen}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left"
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onContextMenu={e => { e.preventDefault(); setMenuOpen(true); }}
+        className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-all text-left select-none ${pressing ? "scale-[0.97] bg-muted/60" : "hover:bg-muted/40"}`}
+        style={{ transition: pressing ? "transform 0.1s, background 0.1s" : "transform 0.2s, background 0.2s" }}
       >
         <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
         <div className="flex-1 min-w-0">
@@ -405,18 +431,18 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
       {menuOpen && (
         <div className="absolute right-2 top-full mt-1 z-50 glass-strong border border-border/60 rounded-xl overflow-hidden shadow-xl animate-fade-in min-w-[160px]">
           <button
-            onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
-            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
-          >
-            <Icon name={archived ? "ArchiveRestore" : "Archive"} size={15} className="text-muted-foreground" />
-            {archived ? "Восстановить" : "В архив"}
-          </button>
-          <button
             onClick={() => { setMenuOpen(false); onOpen(); }}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
           >
             <Icon name="MessageCircle" size={15} className="text-muted-foreground" />
             Открыть чат
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+          >
+            <Icon name={archived ? "ArchiveRestore" : "Archive"} size={15} className="text-muted-foreground" />
+            {archived ? "Восстановить" : "В архив"}
           </button>
         </div>
       )}
