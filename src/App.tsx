@@ -572,7 +572,28 @@ function ChatsTab() {
             <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
           </button>
         )}
-        {activeChats.map((chat) => (
+        {activeChats.filter(c => pinned.includes(c.id)).length > 0 && (
+          <>
+            <div className="flex items-center gap-2 px-3 pt-1 pb-0.5">
+              <Icon name="Pin" size={11} className="text-muted-foreground/60" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Закреплённые</span>
+            </div>
+            {activeChats.filter(c => pinned.includes(c.id)).map(chat => (
+              <ChatRow
+                key={chat.id}
+                chat={chat}
+                onOpen={() => setOpenChat(chat.id)}
+                onArchive={() => archiveChat(chat.id)}
+                onPin={() => togglePin(chat.id)}
+                onMute={() => toggleMute(chat.id)}
+                pinned
+                muted={muted.includes(chat.id)}
+              />
+            ))}
+            <div className="mx-3 my-1 border-t border-border/30" />
+          </>
+        )}
+        {activeChats.filter(c => !pinned.includes(c.id)).map(chat => (
           <ChatRow
             key={chat.id}
             chat={chat}
@@ -580,7 +601,7 @@ function ChatsTab() {
             onArchive={() => archiveChat(chat.id)}
             onPin={() => togglePin(chat.id)}
             onMute={() => toggleMute(chat.id)}
-            pinned={pinned.includes(chat.id)}
+            pinned={false}
             muted={muted.includes(chat.id)}
           />
         ))}
