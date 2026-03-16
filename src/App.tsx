@@ -171,7 +171,7 @@ function VoiceBubble({ url, duration, out }: { url: string; duration: number; ou
   );
 }
 
-function ChatView({ chatId, onBack, hideOnlineStatus }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean }) {
+function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(MESSAGES[chatId] || []);
   const [typing, setTyping] = useState(false);
@@ -309,7 +309,12 @@ function ChatView({ chatId, onBack, hideOnlineStatus }: { chatId: number; onBack
       </div>
 
       <div className="glass-strong px-4 py-3 border-t border-border/50">
-        {recording ? (
+        {messagePrivacy === "nobody" ? (
+          <div className="flex items-center justify-center gap-2.5 py-2 px-4 bg-muted/30 rounded-2xl border border-border/40">
+            <Icon name="Ban" size={15} className="text-muted-foreground flex-shrink-0" />
+            <span className="text-xs text-muted-foreground">Вы запретили получать сообщения · <span className="text-neon-purple cursor-pointer">Изменить</span></span>
+          </div>
+        ) : recording ? (
           <div className="flex items-center gap-3">
             <button onClick={cancelRecording} className="p-2 rounded-xl text-red-400 hover:bg-red-500/10 transition-colors">
               <Icon name="X" size={20} />
@@ -595,7 +600,7 @@ function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   );
 }
 
-function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel }) {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
@@ -607,7 +612,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus }: { sharedPin: st
   const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
   const [unlockedSession, setUnlockedSession] = useState(false);
 
-  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} />;
+  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} />;
 
   const activeChats = CHATS
     .filter(c => !archived.includes(c.id) && !locked.includes(c.id))
@@ -1063,16 +1068,19 @@ function PrivacyRow({ icon, label, value, onChange }: {
   );
 }
 
-function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus }: {
+function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange }: {
   globalPin: string | null;
   onChangePin: () => void;
   onRemovePin: () => void;
   hideOnlineStatus: boolean;
   onToggleOnlineStatus: () => void;
+  messagePrivacy: PrivacyLevel;
+  onMessagePrivacyChange: (v: PrivacyLevel) => void;
+  avatarPrivacy: PrivacyLevel;
+  onAvatarPrivacyChange: (v: PrivacyLevel) => void;
+  callPrivacy: PrivacyLevel;
+  onCallPrivacyChange: (v: PrivacyLevel) => void;
 }) {
-  const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
-  const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
-  const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
 
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
@@ -1162,9 +1170,9 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Кто может</h3>
         <div className="glass rounded-2xl border border-border/40 overflow-hidden mb-4">
-          <PrivacyRow icon="ImageIcon" label="Видеть аватар" value={avatarPrivacy} onChange={setAvatarPrivacy} />
-          <PrivacyRow icon="MessageCircle" label="Писать мне" value={messagePrivacy} onChange={setMessagePrivacy} />
-          <PrivacyRow icon="Phone" label="Звонить мне" value={callPrivacy} onChange={setCallPrivacy} />
+          <PrivacyRow icon="ImageIcon" label="Видеть аватар" value={avatarPrivacy} onChange={onAvatarPrivacyChange} />
+          <PrivacyRow icon="MessageCircle" label="Писать мне" value={messagePrivacy} onChange={onMessagePrivacyChange} />
+          <PrivacyRow icon="Phone" label="Звонить мне" value={callPrivacy} onChange={onCallPrivacyChange} />
         </div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Возможности</h3>
@@ -1344,6 +1352,9 @@ export default function App() {
   const [globalPin, setGlobalPin] = useState<string | null>(null);
   const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
   const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
+  const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
+  const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
+  const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
 
   const handleAccept = () => {
     setActiveCall(incomingCall);
@@ -1384,12 +1395,12 @@ export default function App() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} />;
       case "contacts": return <ContactsTab />;
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} />;
     }
   };
 
