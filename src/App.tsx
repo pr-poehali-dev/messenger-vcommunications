@@ -594,13 +594,13 @@ function PinPad({ mode, onSuccess, onCancel, existingPin }: {
   );
 }
 
-function ChatsTab() {
+function ChatsTab({ sharedPin, onPinCreated }: { sharedPin: string | null; onPinCreated: (pin: string) => void }) {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
   const [muted, setMuted] = useState<number[]>([]);
   const [locked, setLocked] = useState<number[]>([]);
-  const [globalPin, setGlobalPin] = useState<string | null>(null);
+  const globalPin = sharedPin;
   const [showArchive, setShowArchive] = useState(false);
   const [showLocked, setShowLocked] = useState(false);
   const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
@@ -644,7 +644,7 @@ function ChatsTab() {
   function onPinSuccess(pin?: string) {
     if (!pinPad) return;
     if (pinPad.mode === "confirm" && pin) {
-      setGlobalPin(pin);
+      onPinCreated(pin);
       if (pinPad.chatId) setLocked(prev => [...prev, pinPad.chatId!]);
     } else if (pinPad.action === "unlock" && pinPad.chatId) {
       setLocked(prev => prev.filter(x => x !== pinPad.chatId));
@@ -1010,7 +1010,11 @@ function MediaTab() {
   );
 }
 
-function ProfileTab() {
+function ProfileTab({ globalPin, onChangePin, onRemovePin }: {
+  globalPin: string | null;
+  onChangePin: () => void;
+  onRemovePin: () => void;
+}) {
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
     { icon: "RefreshCw", label: "Синхронизация", desc: "Все устройства", color: "text-blue-400" },
@@ -1042,6 +1046,42 @@ function ProfileTab() {
 
         <div className="glass rounded-2xl p-3 mb-4 border border-neon-purple/20">
           <p className="text-sm text-muted-foreground italic">"На связи всегда 🚀"</p>
+        </div>
+
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Конфиденциальность</h3>
+        <div className="glass rounded-2xl border border-border/40 overflow-hidden mb-4">
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${globalPin ? "bg-neon-purple/20" : "bg-muted/50"}`}>
+              <Icon name="Lock" size={16} className={globalPin ? "text-neon-purple" : "text-muted-foreground"} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold">Закрытые чаты</div>
+              <div className="text-xs text-muted-foreground">{globalPin ? "Пин-код установлен" : "Пин-код не задан"}</div>
+            </div>
+            {globalPin ? (
+              <div className="flex gap-1.5">
+                <button
+                  onClick={onChangePin}
+                  className="px-3 py-1.5 rounded-xl bg-muted/50 text-xs font-medium hover:bg-muted transition-colors"
+                >
+                  Изменить
+                </button>
+                <button
+                  onClick={onRemovePin}
+                  className="px-3 py-1.5 rounded-xl bg-destructive/10 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                >
+                  Удалить
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onChangePin}
+                className="px-3 py-1.5 rounded-xl gradient-purple-blue text-white text-xs font-medium"
+              >
+                Задать
+              </button>
+            )}
+          </div>
         </div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Возможности</h3>
@@ -1218,6 +1258,8 @@ export default function App() {
     type: "video",
   });
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
+  const [globalPin, setGlobalPin] = useState<string | null>(null);
+  const [pinPadApp, setPinPadApp] = useState<null | { mode: "confirm"; resolve: (pin: string) => void }>(null);
 
   const handleAccept = () => {
     setActiveCall(incomingCall);
@@ -1226,14 +1268,20 @@ export default function App() {
   const handleDecline = () => setIncomingCall(null);
   const handleEndCall = () => setActiveCall(null);
 
+  function requestSetPin() {
+    setPinPadApp({ mode: "confirm", resolve: (pin) => { setGlobalPin(pin); setPinPadApp(null); } });
+  }
+
+  function removePin() { setGlobalPin(null); }
+
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} />;
       case "contacts": return <ContactsTab />;
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} />;
     }
   };
 
@@ -1266,6 +1314,13 @@ export default function App() {
 
         <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neon-blue/30 to-transparent" />
 
+        {pinPadApp && (
+          <PinPad
+            mode={pinPadApp.mode}
+            onSuccess={(pin) => pin && pinPadApp.resolve(pin)}
+            onCancel={() => setPinPadApp(null)}
+          />
+        )}
         {incomingCall && (
           <IncomingCallScreen call={incomingCall} onAccept={handleAccept} onDecline={handleDecline} />
         )}
