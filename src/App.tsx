@@ -171,7 +171,7 @@ function VoiceBubble({ url, duration, out }: { url: string; duration: number; ou
   );
 }
 
-function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
+function ChatView({ chatId, onBack, hideOnlineStatus }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(MESSAGES[chatId] || []);
   const [typing, setTyping] = useState(false);
@@ -261,11 +261,11 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
           <Icon name="ChevronLeft" size={20} />
         </button>
-        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
+        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={!hideOnlineStatus && chat.contact.online} />
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-sm truncate">{chat.contact.name}</div>
           <div className="text-xs text-muted-foreground">
-            {typing ? <span className="text-neon-purple animate-pulse">печатает...</span> : (chat.contact.online ? "В сети" : chat.contact.status)}
+            {typing ? <span className="text-neon-purple animate-pulse">печатает...</span> : (hideOnlineStatus ? chat.contact.status : (chat.contact.online ? "В сети" : chat.contact.status))}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -595,7 +595,7 @@ function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   );
 }
 
-function ChatsTab({ sharedPin, onPinCreated }: { sharedPin: string | null; onPinCreated: (pin: string) => void }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean }) {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
@@ -607,7 +607,7 @@ function ChatsTab({ sharedPin, onPinCreated }: { sharedPin: string | null; onPin
   const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
   const [unlockedSession, setUnlockedSession] = useState(false);
 
-  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} />;
+  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} />;
 
   const activeChats = CHATS
     .filter(c => !archived.includes(c.id) && !locked.includes(c.id))
@@ -1011,10 +1011,12 @@ function MediaTab() {
   );
 }
 
-function ProfileTab({ globalPin, onChangePin, onRemovePin }: {
+function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus }: {
   globalPin: string | null;
   onChangePin: () => void;
   onRemovePin: () => void;
+  hideOnlineStatus: boolean;
+  onToggleOnlineStatus: () => void;
 }) {
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
@@ -1039,8 +1041,10 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin }: {
             <h2 className="text-lg font-bold">Алексей Смирнов</h2>
             <p className="text-sm text-muted-foreground">+7 (999) 123-45-67</p>
             <div className="flex items-center gap-1.5 mt-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="text-xs text-emerald-400 font-medium">В сети</span>
+              <span className={`w-2 h-2 rounded-full ${hideOnlineStatus ? "bg-muted-foreground/40" : "bg-emerald-500"}`} />
+              <span className={`text-xs font-medium ${hideOnlineStatus ? "text-muted-foreground" : "text-emerald-400"}`}>
+                {hideOnlineStatus ? "Скрыт" : "В сети"}
+              </span>
             </div>
           </div>
         </div>
@@ -1051,6 +1055,21 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin }: {
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Конфиденциальность</h3>
         <div className="glass rounded-2xl border border-border/40 overflow-hidden mb-4">
+          <div className="flex items-center gap-3 px-4 py-3.5 border-b border-border/30">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${hideOnlineStatus ? "bg-neon-purple/20" : "bg-muted/50"}`}>
+              <Icon name="EyeOff" size={16} className={hideOnlineStatus ? "text-neon-purple" : "text-muted-foreground"} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold">Скрыть время захода</div>
+              <div className="text-xs text-muted-foreground">{hideOnlineStatus ? "Статус скрыт от других" : "Все видят когда вы онлайн"}</div>
+            </div>
+            <button
+              onClick={onToggleOnlineStatus}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${hideOnlineStatus ? "bg-neon-purple" : "bg-muted"}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${hideOnlineStatus ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
           <div className="flex items-center gap-3 px-4 py-3.5">
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${globalPin ? "bg-neon-purple/20" : "bg-muted/50"}`}>
               <Icon name="Lock" size={16} className={globalPin ? "text-neon-purple" : "text-muted-foreground"} />
@@ -1261,6 +1280,7 @@ export default function App() {
   const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
   const [globalPin, setGlobalPin] = useState<string | null>(null);
   const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
+  const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
 
   const handleAccept = () => {
     setActiveCall(incomingCall);
@@ -1301,12 +1321,12 @@ export default function App() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} />;
       case "contacts": return <ContactsTab />;
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} />;
     }
   };
 
