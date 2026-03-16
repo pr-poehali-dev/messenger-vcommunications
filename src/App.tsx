@@ -357,12 +357,16 @@ function ChatView({ chatId, onBack }: { chatId: number; onBack: () => void }) {
   );
 }
 
-function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
+function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted, onPin, onMute }: {
   chat: typeof CHATS[0];
   onOpen: () => void;
   onArchive?: () => void;
   onUnarchive?: () => void;
   archived?: boolean;
+  pinned?: boolean;
+  muted?: boolean;
+  onPin?: () => void;
+  onMute?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pressing, setPressing] = useState(false);
@@ -409,13 +413,19 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
         <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={chat.contact.online} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-0.5">
-            <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
-            <span className="text-[11px] text-muted-foreground flex-shrink-0 ml-2">{chat.time}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {pinned && <Icon name="Pin" size={11} className="text-neon-purple flex-shrink-0" />}
+              <span className="font-semibold text-sm truncate">{chat.contact.name}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+              {muted && <Icon name="BellOff" size={11} className="text-muted-foreground" />}
+              <span className="text-[11px] text-muted-foreground">{chat.time}</span>
+            </div>
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground truncate">{chat.lastMsg}</span>
             {!archived && chat.unread > 0 && (
-              <span className="flex-shrink-0 min-w-5 h-5 gradient-purple-blue text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1.5">
+              <span className={`flex-shrink-0 min-w-5 h-5 text-[10px] font-bold rounded-full flex items-center justify-center px-1.5 ${muted ? "bg-muted text-muted-foreground" : "gradient-purple-blue text-white"}`}>
                 {chat.unread}
               </span>
             )}
@@ -429,7 +439,7 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
         <Icon name="MoreVertical" size={15} />
       </button>
       {menuOpen && (
-        <div className="absolute right-2 top-full mt-1 z-50 glass-strong border border-border/60 rounded-xl overflow-hidden shadow-xl animate-fade-in min-w-[160px]">
+        <div className="absolute right-2 top-full mt-1 z-50 glass-strong border border-border/60 rounded-xl overflow-hidden shadow-xl animate-fade-in min-w-[170px]">
           <button
             onClick={() => { setMenuOpen(false); onOpen(); }}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
@@ -437,6 +447,23 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
             <Icon name="MessageCircle" size={15} className="text-muted-foreground" />
             Открыть чат
           </button>
+          {!archived && (
+            <button
+              onClick={() => { setMenuOpen(false); onPin?.(); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+            >
+              <Icon name={pinned ? "PinOff" : "Pin"} size={15} className="text-muted-foreground" />
+              {pinned ? "Открепить" : "Закрепить"}
+            </button>
+          )}
+          <button
+            onClick={() => { setMenuOpen(false); onMute?.(); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
+          >
+            <Icon name={muted ? "Bell" : "BellOff"} size={15} className="text-muted-foreground" />
+            {muted ? "Включить звук" : "Заглушить"}
+          </button>
+          <div className="border-t border-border/40" />
           <button
             onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-left"
@@ -453,15 +480,25 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived }: {
 function ChatsTab() {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
+  const [pinned, setPinned] = useState<number[]>([]);
+  const [muted, setMuted] = useState<number[]>([]);
   const [showArchive, setShowArchive] = useState(false);
 
   if (openChat !== null) return <ChatView chatId={openChat} onBack={() => setOpenChat(null)} />;
 
-  const activeChats = CHATS.filter(c => !archived.includes(c.id));
+  const activeChats = CHATS
+    .filter(c => !archived.includes(c.id))
+    .sort((a, b) => {
+      const ap = pinned.includes(a.id) ? 0 : 1;
+      const bp = pinned.includes(b.id) ? 0 : 1;
+      return ap - bp;
+    });
   const archivedChats = CHATS.filter(c => archived.includes(c.id));
 
   function archiveChat(id: number) { setArchived(prev => [...prev, id]); }
   function unarchiveChat(id: number) { setArchived(prev => prev.filter(x => x !== id)); }
+  function togglePin(id: number) { setPinned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
+  function toggleMute(id: number) { setMuted(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
 
   if (showArchive) {
     return (
@@ -489,6 +526,8 @@ function ChatsTab() {
                 chat={chat}
                 onOpen={() => setOpenChat(chat.id)}
                 onUnarchive={() => unarchiveChat(chat.id)}
+                onMute={() => toggleMute(chat.id)}
+                muted={muted.includes(chat.id)}
                 archived
               />
             ))
@@ -533,12 +572,16 @@ function ChatsTab() {
             <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
           </button>
         )}
-        {activeChats.map((chat, i) => (
+        {activeChats.map((chat) => (
           <ChatRow
             key={chat.id}
             chat={chat}
             onOpen={() => setOpenChat(chat.id)}
             onArchive={() => archiveChat(chat.id)}
+            onPin={() => togglePin(chat.id)}
+            onMute={() => toggleMute(chat.id)}
+            pinned={pinned.includes(chat.id)}
+            muted={muted.includes(chat.id)}
           />
         ))}
       </div>
