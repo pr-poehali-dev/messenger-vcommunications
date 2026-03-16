@@ -171,7 +171,7 @@ function VoiceBubble({ url, duration, out }: { url: string; duration: number; ou
   );
 }
 
-function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel }) {
+function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(MESSAGES[chatId] || []);
   const [typing, setTyping] = useState(false);
@@ -312,7 +312,7 @@ function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy }: { chatId
         {messagePrivacy === "nobody" ? (
           <div className="flex items-center justify-center gap-2.5 py-2 px-4 bg-muted/30 rounded-2xl border border-border/40">
             <Icon name="Ban" size={15} className="text-muted-foreground flex-shrink-0" />
-            <span className="text-xs text-muted-foreground">Вы запретили получать сообщения · <span className="text-neon-purple cursor-pointer">Изменить</span></span>
+            <span className="text-xs text-muted-foreground">Вы запретили получать сообщения · <button onClick={() => { onBack(); onGoToPrivacy?.(); }} className="text-neon-purple hover:underline">Изменить</button></span>
           </div>
         ) : recording ? (
           <div className="flex items-center gap-3">
@@ -600,7 +600,7 @@ function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   );
 }
 
-function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void }) {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
@@ -612,7 +612,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy }:
   const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
   const [unlockedSession, setUnlockedSession] = useState(false);
 
-  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} />;
+  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={onGoToPrivacy} />;
 
   const activeChats = CHATS
     .filter(c => !archived.includes(c.id) && !locked.includes(c.id))
@@ -1395,7 +1395,7 @@ export default function App() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} />;
       case "contacts": return <ContactsTab />;
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
