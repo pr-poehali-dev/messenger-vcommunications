@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import AuthPage from "@/AuthPage";
+
+const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
+
+interface AuthUser { id: number; phone: string; username: string; }
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
 
@@ -1068,7 +1073,7 @@ function PrivacyRow({ icon, label, value, onChange }: {
   );
 }
 
-function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange }: {
+function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange, authUser, onLogout }: {
   globalPin: string | null;
   onChangePin: () => void;
   onRemovePin: () => void;
@@ -1080,6 +1085,8 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
   onAvatarPrivacyChange: (v: PrivacyLevel) => void;
   callPrivacy: PrivacyLevel;
   onCallPrivacyChange: (v: PrivacyLevel) => void;
+  authUser?: AuthUser | null;
+  onLogout?: () => void;
 }) {
 
   const features = [
@@ -1101,9 +1108,9 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
               <Icon name="Camera" size={13} className="text-white" />
             </button>
           </div>
-          <div>
-            <h2 className="text-lg font-bold">Алексей Смирнов</h2>
-            <p className="text-sm text-muted-foreground">+7 (999) 123-45-67</p>
+          <div className="flex-1">
+            <h2 className="text-lg font-bold">{authUser ? `@${authUser.username}` : "Алексей Смирнов"}</h2>
+            <p className="text-sm text-muted-foreground">{authUser ? authUser.phone : "+7 (999) 123-45-67"}</p>
             <div className="flex items-center gap-1.5 mt-1">
               <span className={`w-2 h-2 rounded-full ${hideOnlineStatus ? "bg-muted-foreground/40" : "bg-emerald-500"}`} />
               <span className={`text-xs font-medium ${hideOnlineStatus ? "text-muted-foreground" : "text-emerald-400"}`}>
@@ -1111,6 +1118,11 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
               </span>
             </div>
           </div>
+          {onLogout && (
+            <button onClick={onLogout} className="w-9 h-9 rounded-xl bg-muted/50 hover:bg-red-500/20 flex items-center justify-center transition-colors group">
+              <Icon name="LogOut" size={16} className="text-muted-foreground group-hover:text-red-400 transition-colors" />
+            </button>
+          )}
         </div>
 
         <div className="glass rounded-2xl p-3 mb-4 border border-neon-purple/20">
@@ -1343,6 +1355,35 @@ function ActiveCallScreen({ call, onEnd }: { call: IncomingCall; onEnd: () => vo
 }
 
 export default function App() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return null;
+    const saved = localStorage.getItem("auth_user");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    fetch(`${AUTH_URL}?action=me`, { headers: { "X-Session-Token": token } })
+      .then(r => r.json())
+      .then(d => { if (d.user) { setAuthUser(d.user); localStorage.setItem("auth_user", JSON.stringify(d.user)); } else { localStorage.removeItem("auth_token"); localStorage.removeItem("auth_user"); setAuthUser(null); } })
+      .catch(() => {});
+  }, []);
+
+  function handleAuth(user: AuthUser, _token: string) {
+    localStorage.setItem("auth_user", JSON.stringify(user));
+    setAuthUser(user);
+  }
+
+  function handleLogout() {
+    const token = localStorage.getItem("auth_token");
+    if (token) fetch(`${AUTH_URL}?action=logout`, { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
+    setAuthUser(null);
+  }
+
   const [activeTab, setActiveTab] = useState<Tab>("chats");
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>({
     contact: CONTACTS[0],
@@ -1400,9 +1441,11 @@ export default function App() {
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} />;
     }
   };
+
+  if (!authUser) return <AuthPage onAuth={handleAuth} />;
 
   return (
     <div className="h-screen w-screen mesh-bg flex items-center justify-center overflow-hidden font-golos">
