@@ -140,6 +140,56 @@ function playNotification() {
   }
 }
 
+function createRingTone(ctx: AudioContext): () => void {
+  let stopped = false;
+  let timeout: ReturnType<typeof setTimeout>;
+
+  function ring() {
+    if (stopped) return;
+    const o1 = ctx.createOscillator();
+    const o2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    o1.connect(gain); o2.connect(gain); gain.connect(ctx.destination);
+    o1.frequency.value = 480; o2.frequency.value = 620;
+    o1.type = 'sine'; o2.type = 'sine';
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.02);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime + 0.38);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+    o1.start(ctx.currentTime); o2.start(ctx.currentTime);
+    o1.stop(ctx.currentTime + 0.4); o2.stop(ctx.currentTime + 0.4);
+    timeout = setTimeout(ring, 600);
+  }
+
+  ring();
+  return () => { stopped = true; clearTimeout(timeout); };
+}
+
+function createDialTone(ctx: AudioContext): () => void {
+  let stopped = false;
+  let timeout: ReturnType<typeof setTimeout>;
+
+  function ring() {
+    if (stopped) return;
+    const o1 = ctx.createOscillator();
+    const o2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    o1.connect(gain); o2.connect(gain); gain.connect(ctx.destination);
+    o1.frequency.value = 440; o2.frequency.value = 480;
+    o1.type = 'sine'; o2.type = 'sine';
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime + 0.95);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.0);
+    o1.start(ctx.currentTime); o2.start(ctx.currentTime);
+    o1.stop(ctx.currentTime + 1.0); o2.stop(ctx.currentTime + 1.0);
+    timeout = setTimeout(ring, 3000);
+  }
+
+  ring();
+  return () => { stopped = true; clearTimeout(timeout); };
+}
+
 function showPushNotification(title: string, body: string, icon?: string | null) {
   if (!("Notification" in window)) return;
   if (Notification.permission === "granted") {
@@ -1530,6 +1580,12 @@ interface ActiveCallInfo {
 
 function IncomingCallScreen({ call, onAccept, onDecline }: { call: CallInfo; onAccept: () => void; onDecline: () => void }) {
   const name = call.caller.display_name || `@${call.caller.username}`;
+
+  useEffect(() => {
+    if ('vibrate' in navigator) navigator.vibrate([500, 200, 500, 200, 500]);
+    return () => { if ('vibrate' in navigator) navigator.vibrate(0); };
+  }, []);
+
   return (
     <div className="absolute inset-0 z-50 flex flex-col items-center justify-between py-16 px-8 animate-fade-in" style={{ background: "linear-gradient(160deg, hsl(258 85% 10%) 0%, hsl(222 25% 5%) 50%, hsl(210 100% 8%) 100%)" }}>
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1682,12 +1738,28 @@ export default function App() {
   const [activeCall, setActiveCall] = useState<ActiveCallInfo | null>(null);
   const activeCallRef = useRef<ActiveCallInfo | null>(null);
   const incomingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const stopRingtoneRef = useRef<(() => void) | null>(null);
   const [globalPin, setGlobalPin] = useState<string | null>(null);
   const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
   const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
   const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
   const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
   const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
+
+  function stopRingtone() {
+    if (stopRingtoneRef.current) { stopRingtoneRef.current(); stopRingtoneRef.current = null; }
+    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+  }
+
+  function startRingtone(type: 'incoming' | 'outgoing') {
+    stopRingtone();
+    try {
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      stopRingtoneRef.current = type === 'incoming' ? createRingTone(ctx) : createDialTone(ctx);
+    } catch (_e) { /* AudioContext not supported */ }
+  }
 
   // ping — обновляем last_seen каждые 30 сек
   useEffect(() => {
@@ -1709,10 +1781,18 @@ export default function App() {
         const r = await fetchWithTimeout(SIGNALING_URL + "?action=incoming", { headers: { "X-Session-Token": token } });
         const d = await r.json();
         if (d.call && !activeCallRef.current) {
-          setIncomingCall(d.call);
+          setIncomingCall(prev => {
+            if (!prev && d.call) {
+              startRingtone('incoming');
+            }
+            return d.call;
+          });
         } else if (!d.call) {
           setIncomingCall(prev => {
-            if (prev && !activeCallRef.current) return null;
+            if (prev && !activeCallRef.current) {
+              stopRingtone();
+              return null;
+            }
             return prev;
           });
         }
@@ -1746,6 +1826,7 @@ export default function App() {
       const callInfo: ActiveCallInfo = { call_id: data.call_id, otherUser: target, iscaller: true, peerConnection: pc, localStream: stream, remoteStream };
       activeCallRef.current = callInfo;
       setActiveCall(callInfo);
+      startRingtone('outgoing');
 
       // Poll for answer and ICE
       const poll = setInterval(async () => {
@@ -1791,6 +1872,7 @@ export default function App() {
 
   async function handleAccept() {
     if (!incomingCall) return;
+    stopRingtone();
     const token = localStorage.getItem("auth_token") || "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -1858,6 +1940,7 @@ export default function App() {
 
   async function handleDecline() {
     if (!incomingCall) return;
+    stopRingtone();
     const token = localStorage.getItem("auth_token") || "";
     try {
       await fetchWithTimeout(SIGNALING_URL + "?action=reject", {
@@ -1870,6 +1953,7 @@ export default function App() {
   }
 
   function stopCall(callInfo: ActiveCallInfo) {
+    stopRingtone();
     callInfo.localStream.getTracks().forEach(t => t.stop());
     callInfo.peerConnection.close();
     if (activeCallRef.current?.call_id === callInfo.call_id) {
