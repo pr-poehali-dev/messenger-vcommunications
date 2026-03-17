@@ -3,8 +3,9 @@ import Icon from "@/components/ui/icon";
 import AuthPage from "@/AuthPage";
 
 const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
+const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb-09980e8a9c27";
 
-interface AuthUser { id: number; phone: string; username: string; }
+interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; }
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
 
@@ -1073,7 +1074,7 @@ function PrivacyRow({ icon, label, value, onChange }: {
   );
 }
 
-function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange, authUser, onLogout }: {
+function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange, authUser, onLogout, onAvatarUpdate }: {
   globalPin: string | null;
   onChangePin: () => void;
   onRemovePin: () => void;
@@ -1087,7 +1088,33 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
   onCallPrivacyChange: (v: PrivacyLevel) => void;
   authUser?: AuthUser | null;
   onLogout?: () => void;
+  onAvatarUpdate?: (url: string) => void;
 }) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    setAvatarUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      const res = await fetch(UPLOAD_AVATAR_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ image: base64, contentType: file.type }),
+      });
+      const data = await res.json();
+      if (data.avatar_url) {
+        onAvatarUpdate?.(data.avatar_url);
+      }
+      setAvatarUploading(false);
+    };
+    reader.readAsDataURL(file);
+  }
 
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
@@ -1103,12 +1130,25 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
       <div className="px-4 pt-6 pb-4">
         <div className="flex items-center gap-4 mb-5">
           <div className="relative animate-float">
-            <div className="w-20 h-20 rounded-3xl gradient-purple-blue flex items-center justify-center text-white text-2xl font-bold glow-purple">
-              {authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"}
+            <div className="w-20 h-20 rounded-3xl gradient-purple-blue flex items-center justify-center text-white text-2xl font-bold glow-purple overflow-hidden">
+              {authUser?.avatar_url ? (
+                <img src={authUser.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"
+              )}
             </div>
-            <button className="absolute -bottom-1 -right-1 w-7 h-7 gradient-cyan-blue rounded-xl flex items-center justify-center shadow-lg">
-              <Icon name="Camera" size={13} className="text-white" />
+            <button
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={avatarUploading}
+              className="absolute -bottom-1 -right-1 w-7 h-7 gradient-cyan-blue rounded-xl flex items-center justify-center shadow-lg"
+            >
+              {avatarUploading ? (
+                <Icon name="Loader2" size={13} className="text-white animate-spin" />
+              ) : (
+                <Icon name="Camera" size={13} className="text-white" />
+              )}
             </button>
+            <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
           </div>
           <div className="flex-1">
             <h2 className="text-lg font-bold">{authUser ? `@${authUser.username}` : "Алексей Смирнов"}</h2>
@@ -1443,7 +1483,7 @@ export default function App() {
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
     }
   };
 
@@ -1469,8 +1509,12 @@ export default function App() {
                   className={`flex flex-col items-center gap-0.5 px-2.5 py-2 rounded-2xl transition-all duration-200 ${isActive ? "nav-active" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"}`}
                 >
                   {item.id === "profile" && authUser ? (
-                    <div className={`w-5 h-5 rounded-lg gradient-purple-blue flex items-center justify-center text-white text-[9px] font-bold ${isActive ? "ring-2 ring-neon-purple/60" : ""}`}>
-                      {authUser.username.slice(0, 2).toUpperCase()}
+                    <div className={`w-5 h-5 rounded-lg gradient-purple-blue flex items-center justify-center text-white text-[9px] font-bold overflow-hidden ${isActive ? "ring-2 ring-neon-purple/60" : ""}`}>
+                      {authUser.avatar_url ? (
+                        <img src={authUser.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+                      ) : (
+                        authUser.username.slice(0, 2).toUpperCase()
+                      )}
                     </div>
                   ) : (
                     <Icon name={item.icon} size={20} className={isActive ? "text-neon-purple" : ""} />
