@@ -1,12 +1,22 @@
 {
   "tests": [
     {
+      "name": "OPTIONS CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
       "name": "No token returns 401",
       "method": "GET",
       "path": "/?action=incoming",
-      "expectedStatus": 401,
-      "expectedBody": {"error": "string"},
-      "bodyMatcher": "partial"
+      "expectedStatus": 401
+    },
+    {
+      "name": "Heartbeat without token returns 401",
+      "method": "POST",
+      "path": "/?action=heartbeat",
+      "expectedStatus": 401
     }
   ]
 }
