@@ -867,12 +867,24 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   );
 }
 
-function ContactsTab() {
+function ContactsTab({ authUser }: { authUser?: AuthUser | null }) {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold gradient-text">Контакты</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-2xl gradient-purple-blue flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0 glow-purple">
+              {authUser?.avatar_url ? (
+                <img src={authUser.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold leading-tight truncate">{authUser?.display_name || (authUser ? `@${authUser.username}` : "Контакты")}</h1>
+              {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
+            </div>
+          </div>
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
             <Icon name="UserPlus" size={18} />
           </button>
@@ -908,7 +920,7 @@ function ContactsTab() {
   );
 }
 
-function CallsTab() {
+function CallsTab({ authUser }: { authUser?: AuthUser | null }) {
   const [tab, setTab] = useState<"all" | "missed">("all");
   const filtered = tab === "missed" ? CALLS.filter(c => c.missed) : CALLS;
 
@@ -916,7 +928,19 @@ function CallsTab() {
     <div className="flex flex-col h-full">
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold gradient-text">Звонки</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-2xl gradient-purple-blue flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0 glow-purple">
+              {authUser?.avatar_url ? (
+                <img src={authUser.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold leading-tight truncate">{authUser?.display_name || (authUser ? `@${authUser.username}` : "Звонки")}</h1>
+              {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
+            </div>
+          </div>
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
             <Icon name="PhoneCall" size={18} />
           </button>
@@ -1621,8 +1645,8 @@ export default function App() {
   const renderTab = () => {
     switch (activeTab) {
       case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} authUser={authUser} />;
-      case "contacts": return <ContactsTab />;
-      case "calls": return <CallsTab />;
+      case "contacts": return <ContactsTab authUser={authUser} />;
+      case "calls": return <CallsTab authUser={authUser} />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
       case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url ?? null }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} onProfileUpdate={(user) => { const updated = { ...authUser!, ...user }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
