@@ -608,7 +608,7 @@ function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   );
 }
 
-function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null }) {
   const [openChat, setOpenChat] = useState<number | null>(null);
   const [archived, setArchived] = useState<number[]>([]);
   const [pinned, setPinned] = useState<number[]>([]);
@@ -769,7 +769,19 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
       )}
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold gradient-text">Сообщения</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-2xl gradient-purple-blue flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0 glow-purple">
+              {authUser?.avatar_url ? (
+                <img src={authUser.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold leading-tight truncate">{authUser?.display_name || (authUser ? `@${authUser.username}` : "Сообщения")}</h1>
+              {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
+            </div>
+          </div>
           <div className="flex gap-1">
             <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
               <Icon name="Search" size={18} />
@@ -1608,7 +1620,7 @@ export default function App() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} authUser={authUser} />;
       case "contacts": return <ContactsTab />;
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
