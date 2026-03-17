@@ -293,7 +293,7 @@ function fmtLastSeen(last_seen: string) {
 function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy, onCall }: {
   convId: number; otherUser: OtherUser; myId: number; onBack: () => void;
   hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void;
-  onCall?: (user: OtherUser) => void;
+  onCall?: (user: OtherUser, type: 'video' | 'audio') => void;
 }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<RealMessage[]>([]);
@@ -431,7 +431,10 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => onCall?.(otherUser)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+          <button onClick={() => onCall?.(otherUser, 'audio')} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple" title="Аудиозвонок">
+            <Icon name="Phone" size={18} />
+          </button>
+          <button onClick={() => onCall?.(otherUser, 'video')} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple" title="Видеозвонок">
             <Icon name="Video" size={18} />
           </button>
         </div>
@@ -748,7 +751,7 @@ function fmtConvTime(at: string) {
   return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
 }
 
-function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser, onCall }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null; onCall?: (user: OtherUser) => void }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser, onCall }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null; onCall?: (user: OtherUser, type: 'video' | 'audio') => void }) {
   const [openConv, setOpenConv] = useState<{ convId: number; otherUser: OtherUser } | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1570,6 +1573,7 @@ interface CallInfo {
   call_id: number;
   caller: { id: number; username: string; display_name?: string | null; avatar_url?: string | null };
   offer?: RTCSessionDescriptionInit;
+  call_type?: 'video' | 'audio';
 }
 interface ActiveCallInfo {
   call_id: number;
@@ -1578,6 +1582,7 @@ interface ActiveCallInfo {
   peerConnection: RTCPeerConnection;
   localStream: MediaStream;
   remoteStream: MediaStream;
+  call_type: 'video' | 'audio';
 }
 
 function IncomingCallScreen({ call, onAccept, onDecline }: { call: CallInfo; onAccept: () => void; onDecline: () => void }) {
@@ -1596,10 +1601,10 @@ function IncomingCallScreen({ call, onAccept, onDecline }: { call: CallInfo; onA
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.1) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite 1.2s" }} />
       </div>
       <div className="text-center z-10 mt-4">
-        <p className="text-sm text-muted-foreground mb-1 tracking-widest uppercase font-medium">Входящий видеозвонок</p>
+        <p className="text-sm text-muted-foreground mb-1 tracking-widest uppercase font-medium">{call.call_type === 'audio' ? 'Входящий аудиозвонок' : 'Входящий видеозвонок'}</p>
         <h2 className="text-3xl font-bold text-white mb-1">{name}</h2>
         <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-          <Icon name="Video" size={14} />
+          <Icon name={call.call_type === 'audio' ? 'Phone' : 'Video'} size={14} />
           <span className="animate-pulse">Звонит...</span>
         </div>
       </div>
@@ -1630,6 +1635,7 @@ function ActiveCallScreen({ call, onEnd }: { call: ActiveCallInfo; onEnd: () => 
   const [elapsed, setElapsed] = useState(0);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setElapsed(e => e + 1), 1000);
@@ -1646,6 +1652,9 @@ function ActiveCallScreen({ call, onEnd }: { call: ActiveCallInfo; onEnd: () => 
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = call.remoteStream;
     }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = call.remoteStream;
+    }
   }, [call.remoteStream]);
 
   function toggleMic() {
@@ -1661,28 +1670,41 @@ function ActiveCallScreen({ call, onEnd }: { call: ActiveCallInfo; onEnd: () => 
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   const name = call.otherUser.display_name || `@${call.otherUser.username}`;
 
+  const isAudio = call.call_type === 'audio';
+
   return (
-    <div className="absolute inset-0 z-50 flex flex-col animate-fade-in bg-black">
-      <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
-      <div className="absolute inset-0 bg-black/30" />
-
-      <div className="absolute top-4 right-4 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl z-10">
-        <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
-        {camOff && (
-          <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
-            <Icon name="VideoOff" size={24} className="text-white/50" />
+    <div className="absolute inset-0 z-50 flex flex-col animate-fade-in" style={{ background: isAudio ? "linear-gradient(160deg, hsl(258 85% 10%) 0%, hsl(222 25% 5%) 50%, hsl(210 100% 8%) 100%)" : "black" }}>
+      {isAudio ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+          <UserAvatar user={call.otherUser} size={28} />
+          <div className="text-center">
+            <p className="text-white text-xl font-bold">{name}</p>
+            <p className="text-emerald-400 font-mono text-sm mt-1">{fmt(elapsed)}</p>
           </div>
-        )}
-      </div>
-
-      <div className="relative z-10 flex items-center justify-between px-5 pt-10">
-        <div />
-        <div className="text-center">
-          <p className="text-white font-semibold">{name}</p>
-          <p className="text-emerald-400 font-mono text-sm">{fmt(elapsed)}</p>
+          <audio ref={remoteAudioRef} autoPlay />
         </div>
-        <div />
-      </div>
+      ) : (
+        <>
+          <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="absolute top-4 right-4 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl z-10">
+            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
+            {camOff && (
+              <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
+                <Icon name="VideoOff" size={24} className="text-white/50" />
+              </div>
+            )}
+          </div>
+          <div className="relative z-10 flex items-center justify-between px-5 pt-10">
+            <div />
+            <div className="text-center">
+              <p className="text-white font-semibold">{name}</p>
+              <p className="text-emerald-400 font-mono text-sm">{fmt(elapsed)}</p>
+            </div>
+            <div />
+          </div>
+        </>
+      )}
 
       <div className="absolute bottom-0 left-0 right-0 z-10 px-8 pb-12">
         <div className="flex items-center justify-center gap-4 mb-6">
@@ -1690,10 +1712,12 @@ function ActiveCallScreen({ call, onEnd }: { call: ActiveCallInfo; onEnd: () => 
             <Icon name={muted ? "MicOff" : "Mic"} size={20} />
             <span className="text-[9px]">{muted ? "Вкл." : "Микр."}</span>
           </button>
-          <button onClick={toggleCam} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${camOff ? "bg-white/30 text-white" : "bg-white/10 text-white/70 hover:bg-white/20"}`}>
-            <Icon name={camOff ? "VideoOff" : "Video"} size={20} />
-            <span className="text-[9px]">{camOff ? "Вкл." : "Камера"}</span>
-          </button>
+          {!isAudio && (
+            <button onClick={toggleCam} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${camOff ? "bg-white/30 text-white" : "bg-white/10 text-white/70 hover:bg-white/20"}`}>
+              <Icon name={camOff ? "VideoOff" : "Video"} size={20} />
+              <span className="text-[9px]">{camOff ? "Вкл." : "Камера"}</span>
+            </button>
+          )}
         </div>
         <button onClick={onEnd} className="w-full py-4 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/30">
           <Icon name="PhoneOff" size={22} className="text-white" />
@@ -1819,10 +1843,10 @@ export default function App() {
 
   const STUN_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
-  async function startCall(target: OtherUser) {
+  async function startCall(target: OtherUser, callType: 'video' | 'audio' = 'video') {
     const token = localStorage.getItem("auth_token") || "";
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: callType === 'video', audio: true });
       const pc = new RTCPeerConnection(STUN_SERVERS);
       const remoteStream = new MediaStream();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
@@ -1834,12 +1858,12 @@ export default function App() {
       const res = await fetchWithTimeout(SIGNALING_URL + "?action=call", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Token": token },
-        body: JSON.stringify({ callee_id: target.id, offer }),
+        body: JSON.stringify({ callee_id: target.id, offer, call_type: callType }),
       });
       const data = await res.json();
       if (!data.call_id) { stream.getTracks().forEach(t => t.stop()); return; }
 
-      const callInfo: ActiveCallInfo = { call_id: data.call_id, otherUser: target, iscaller: true, peerConnection: pc, localStream: stream, remoteStream };
+      const callInfo: ActiveCallInfo = { call_id: data.call_id, otherUser: target, iscaller: true, peerConnection: pc, localStream: stream, remoteStream, call_type: callType };
       activeCallRef.current = callInfo;
       setActiveCall(callInfo);
       startRingtone('outgoing');
@@ -1892,7 +1916,7 @@ export default function App() {
     if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
     const token = localStorage.getItem("auth_token") || "";
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: (incomingCall.call_type || 'video') === 'video', audio: true });
       const pc = new RTCPeerConnection(STUN_SERVERS);
       const remoteStream = new MediaStream();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
@@ -1908,7 +1932,7 @@ export default function App() {
         body: JSON.stringify({ call_id: incomingCall.call_id, answer }),
       });
 
-      const callInfo: ActiveCallInfo = { call_id: incomingCall.call_id, otherUser: incomingCall.caller, iscaller: false, peerConnection: pc, localStream: stream, remoteStream };
+      const callInfo: ActiveCallInfo = { call_id: incomingCall.call_id, otherUser: incomingCall.caller, iscaller: false, peerConnection: pc, localStream: stream, remoteStream, call_type: incomingCall.call_type || 'video' };
       activeCallRef.current = callInfo;
       setIncomingCall(null);
       setActiveCall(callInfo);
