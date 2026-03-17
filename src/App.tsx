@@ -111,8 +111,6 @@ function getNow() {
 function playNotification() {
   try {
     const ctx = new AudioContext();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
     [[880, 0, 0.08], [1100, 0.1, 0.08], [1320, 0.2, 0.1]].forEach(([freq, start, dur]) => {
       const osc = ctx.createOscillator();
       osc.type = "sine";
@@ -128,6 +126,22 @@ function playNotification() {
     });
   } catch (e) {
     void e;
+  }
+}
+
+function showPushNotification(title: string, body: string, icon?: string | null) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    try {
+      new Notification(title, { body, icon: icon || undefined, silent: true });
+    } catch (e) { void e; }
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    await Notification.requestPermission();
   }
 }
 
@@ -236,6 +250,13 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
     if (data.messages) {
       if (after) {
         if (data.messages.length > 0) {
+          const incoming = (data.messages as RealMessage[]).filter(m => m.sender_id !== myId);
+          if (incoming.length > 0) {
+            playNotification();
+            const last = incoming[incoming.length - 1];
+            const name = otherUser.display_name || `@${otherUser.username}`;
+            showPushNotification(name, last.text, otherUser.avatar_url);
+          }
           setMessages(prev => [...prev, ...data.messages]);
           setLastId(data.messages[data.messages.length - 1].id);
         }
@@ -647,16 +668,32 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = localStorage.getItem("auth_token") || "";
 
-  async function loadConversations() {
+  const prevUnreadRef = useRef<Record<number, number>>({});
+
+  async function loadConversations(notify = false) {
     const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
     const data = await res.json();
-    if (data.conversations) setConversations(data.conversations);
+    if (data.conversations) {
+      if (notify) {
+        for (const conv of data.conversations as Conversation[]) {
+          const prevUnread = prevUnreadRef.current[conv.id] ?? conv.unread;
+          if (conv.unread > prevUnread && conv.last_message && !conv.last_message.mine) {
+            const name = conv.other_user.display_name || `@${conv.other_user.username}`;
+            playNotification();
+            showPushNotification(name, conv.last_message.text, conv.other_user.avatar_url);
+          }
+        }
+      }
+      prevUnreadRef.current = Object.fromEntries((data.conversations as Conversation[]).map(c => [c.id, c.unread]));
+      setConversations(data.conversations);
+    }
     setLoading(false);
   }
 
   useEffect(() => {
-    loadConversations();
-    pollRef.current = setInterval(loadConversations, 3000);
+    requestNotificationPermission();
+    loadConversations(false);
+    pollRef.current = setInterval(() => loadConversations(true), 3000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
