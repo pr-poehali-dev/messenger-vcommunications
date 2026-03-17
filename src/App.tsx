@@ -8,6 +8,16 @@ const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb
 const UPDATE_PROFILE_URL = "https://functions.poehali.dev/906e9817-4957-4d99-9bc2-082e8b2d03df";
 const MESSAGES_URL = "https://functions.poehali.dev/2bd34809-22df-4f72-8b11-90ec52d3b5d0";
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, ms = 8000): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; display_name?: string | null; status?: string | null; }
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
@@ -249,7 +259,7 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
       const url = after
         ? `${MESSAGES_URL}?action=messages&conv_id=${convId}&after=${after}`
         : `${MESSAGES_URL}?action=messages&conv_id=${convId}`;
-      const res = await fetch(url, { headers: { "X-Session-Token": token } });
+      const res = await fetchWithTimeout(url, { headers: { "X-Session-Token": token } });
       const data = await res.json();
       if (data.messages) {
         if (after) {
@@ -280,7 +290,7 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
 
   async function loadOnlineStatus() {
     try {
-      const res = await fetch(`${MESSAGES_URL}?action=online&user_id=${otherUser.id}`, { headers: { "X-Session-Token": token } });
+      const res = await fetchWithTimeout(`${MESSAGES_URL}?action=online&user_id=${otherUser.id}`, { headers: { "X-Session-Token": token } });
       const data = await res.json();
       if ('online' in data) setOnlineStatus(data);
     } catch (_) { /* network error */ }
@@ -290,7 +300,7 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
     loadMessages();
     pollRef.current = setInterval(() => {
       setLastId(prev => { loadMessages(prev); return prev; });
-    }, 2500);
+    }, 4000);
     loadOnlineStatus();
     onlineRef.current = setInterval(loadOnlineStatus, 30000);
     return () => {
@@ -707,7 +717,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
 
   async function loadConversations(notify = false) {
     try {
-      const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
+      const res = await fetchWithTimeout(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
       const data = await res.json();
       setOffline(false);
       if (data.conversations) {
@@ -737,7 +747,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   useEffect(() => {
     requestNotificationPermission();
     loadConversations(false);
-    pollRef.current = setInterval(() => loadConversations(true), 3000);
+    pollRef.current = setInterval(() => loadConversations(true), 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
