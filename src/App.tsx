@@ -1103,7 +1103,9 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
       <div className="px-4 pt-6 pb-4">
         <div className="flex items-center gap-4 mb-5">
           <div className="relative animate-float">
-            <div className="w-20 h-20 rounded-3xl gradient-purple-blue flex items-center justify-center text-white text-2xl font-bold glow-purple">АС</div>
+            <div className="w-20 h-20 rounded-3xl gradient-purple-blue flex items-center justify-center text-white text-2xl font-bold glow-purple">
+              {authUser ? authUser.username.slice(0, 2).toUpperCase() : "АС"}
+            </div>
             <button className="absolute -bottom-1 -right-1 w-7 h-7 gradient-cyan-blue rounded-xl flex items-center justify-center shadow-lg">
               <Icon name="Camera" size={13} className="text-white" />
             </button>
