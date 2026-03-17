@@ -1841,19 +1841,22 @@ export default function App() {
     return () => { if (incomingPollRef.current) clearInterval(incomingPollRef.current); };
   }, [authUser]);
 
-  const STUN_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+  const DEFAULT_ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+
+  function buildPcConfig(iceServers?: RTCIceServer[]) {
+    return { iceServers: iceServers && iceServers.length ? iceServers : DEFAULT_ICE.iceServers };
+  }
 
   async function startCall(target: OtherUser, callType: 'video' | 'audio' = 'video') {
     const token = localStorage.getItem("auth_token") || "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: callType === 'video', audio: true });
-      const pc = new RTCPeerConnection(STUN_SERVERS);
-      const remoteStream = new MediaStream();
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      const offer_pc = new RTCPeerConnection(DEFAULT_ICE);
+      stream.getTracks().forEach(t => offer_pc.addTrack(t, stream));
+      const offer = await offer_pc.createOffer();
+      await offer_pc.setLocalDescription(offer);
+      offer_pc.close();
 
       const res = await fetchWithTimeout(SIGNALING_URL + "?action=call", {
         method: "POST",
@@ -1863,15 +1866,21 @@ export default function App() {
       const data = await res.json();
       if (!data.call_id) { stream.getTracks().forEach(t => t.stop()); return; }
 
+      const pc = new RTCPeerConnection(buildPcConfig(data.ice_servers));
+      const remoteStream = new MediaStream();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+      await pc.setLocalDescription(offer);
+
       const callInfo: ActiveCallInfo = { call_id: data.call_id, otherUser: target, iscaller: true, peerConnection: pc, localStream: stream, remoteStream, call_type: callType };
       activeCallRef.current = callInfo;
       setActiveCall(callInfo);
       startRingtone('outgoing');
 
-      // Poll for answer and ICE
+      let iceSeq = 0;
       const poll = setInterval(async () => {
         try {
-          const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${data.call_id}`, { headers: { "X-Session-Token": token } });
+          const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${data.call_id}&since_caller=0&since_callee=${iceSeq}`, { headers: { "X-Session-Token": token } });
           const d = await r.json();
           if (d.status === 'ended' || d.status === 'rejected') {
             clearInterval(poll);
@@ -1881,13 +1890,14 @@ export default function App() {
           if (d.answer && !pc.remoteDescription) {
             await pc.setRemoteDescription(new RTCSessionDescription(d.answer));
           }
-          if (d.ice && Array.isArray(d.ice)) {
+          if (d.ice && Array.isArray(d.ice) && d.ice.length > 0) {
             for (const c of d.ice) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_e) { /* ignore bad candidate */ }
+              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_ignored) { /* bad candidate */ }
             }
+            iceSeq = d.ice_seq;
           }
-        } catch (_e) { /* ignore poll error */ }
-      }, 2000);
+        } catch (_ignored) { /* poll error */ }
+      }, 1500);
 
       pc.onicecandidate = async e => {
         if (e.candidate) {
@@ -1897,7 +1907,7 @@ export default function App() {
               headers: { "Content-Type": "application/json", "X-Session-Token": token },
               body: JSON.stringify({ call_id: data.call_id, candidate: e.candidate.toJSON() }),
             });
-          } catch (_e) { /* ignore ice send error */ }
+          } catch (_ignored) { /* ice send error */ }
         }
       };
 
@@ -1907,7 +1917,7 @@ export default function App() {
           stopCall(callInfo);
         }
       };
-    } catch (_e) { /* ignore startCall error */ }
+    } catch (_ignored) { /* startCall error */ }
   }
 
   async function handleAccept() {
@@ -1915,66 +1925,117 @@ export default function App() {
     stopRingtone();
     if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
     const token = localStorage.getItem("auth_token") || "";
+    const savedCall = incomingCall;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: (incomingCall.call_type || 'video') === 'video', audio: true });
-      const pc = new RTCPeerConnection(STUN_SERVERS);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: (savedCall.call_type || 'video') === 'video', audio: true });
+      const pc = new RTCPeerConnection(buildPcConfig());
       const remoteStream = new MediaStream();
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
       pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
 
-      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer!));
+      await pc.setRemoteDescription(new RTCSessionDescription(savedCall.offer!));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      await fetchWithTimeout(SIGNALING_URL + "?action=answer", {
+      const ansRes = await fetchWithTimeout(SIGNALING_URL + "?action=answer", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Token": token },
-        body: JSON.stringify({ call_id: incomingCall.call_id, answer }),
+        body: JSON.stringify({ call_id: savedCall.call_id, answer }),
       });
+      const ansData = await ansRes.json();
+      if (ansData.ice_servers) {
+        const newPc = new RTCPeerConnection(buildPcConfig(ansData.ice_servers));
+        stream.getTracks().forEach(t => newPc.addTrack(t, stream));
+        newPc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+        await newPc.setRemoteDescription(new RTCSessionDescription(savedCall.offer!));
+        const ans2 = await newPc.createAnswer();
+        await newPc.setLocalDescription(ans2);
+        pc.close();
 
-      const callInfo: ActiveCallInfo = { call_id: incomingCall.call_id, otherUser: incomingCall.caller, iscaller: false, peerConnection: pc, localStream: stream, remoteStream, call_type: incomingCall.call_type || 'video' };
-      activeCallRef.current = callInfo;
-      setIncomingCall(null);
-      setActiveCall(callInfo);
+        const callInfo: ActiveCallInfo = { call_id: savedCall.call_id, otherUser: savedCall.caller, iscaller: false, peerConnection: newPc, localStream: stream, remoteStream, call_type: savedCall.call_type || 'video' };
+        activeCallRef.current = callInfo;
+        setIncomingCall(null);
+        setActiveCall(callInfo);
 
-      // Poll for ICE and status
-      const poll = setInterval(async () => {
-        try {
-          const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${incomingCall.call_id}`, { headers: { "X-Session-Token": token } });
-          const d = await r.json();
-          if (d.status === 'ended') { clearInterval(poll); stopCall(callInfo); return; }
-          if (d.ice && Array.isArray(d.ice)) {
-            for (const c of d.ice) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_e) { /* ignore bad candidate */ }
-            }
-          }
-        } catch (_e) { /* ignore poll error */ }
-      }, 2000);
-
-      pc.onicecandidate = async e => {
-        if (e.candidate) {
+        let iceSeq = 0;
+        const poll = setInterval(async () => {
           try {
-            await fetchWithTimeout(SIGNALING_URL + "?action=ice", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Session-Token": token },
-              body: JSON.stringify({ call_id: incomingCall.call_id, candidate: e.candidate.toJSON() }),
-            });
-          } catch (_e) { /* ignore ice send error */ }
-        }
-      };
+            const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${savedCall.call_id}&since_caller=${iceSeq}&since_callee=0`, { headers: { "X-Session-Token": token } });
+            const d = await r.json();
+            if (d.status === 'ended') { clearInterval(poll); stopCall(callInfo); return; }
+            if (d.ice && Array.isArray(d.ice) && d.ice.length > 0) {
+              for (const c of d.ice) {
+                try { await newPc.addIceCandidate(new RTCIceCandidate(c)); } catch (_ignored) { /* bad candidate */ }
+              }
+              iceSeq = d.ice_seq;
+            }
+          } catch (_ignored) { /* poll error */ }
+        }, 1500);
 
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-          clearInterval(poll);
-          stopCall(callInfo);
-        }
-      };
-    } catch (_) {
+        newPc.onicecandidate = async e => {
+          if (e.candidate) {
+            try {
+              await fetchWithTimeout(SIGNALING_URL + "?action=ice", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Session-Token": token },
+                body: JSON.stringify({ call_id: savedCall.call_id, candidate: e.candidate.toJSON() }),
+              });
+            } catch (_ignored) { /* ice send error */ }
+          }
+        };
+
+        newPc.onconnectionstatechange = () => {
+          if (newPc.connectionState === 'disconnected' || newPc.connectionState === 'failed') {
+            clearInterval(poll);
+            stopCall(callInfo);
+          }
+        };
+      } else {
+        const callInfo: ActiveCallInfo = { call_id: savedCall.call_id, otherUser: savedCall.caller, iscaller: false, peerConnection: pc, localStream: stream, remoteStream, call_type: savedCall.call_type || 'video' };
+        activeCallRef.current = callInfo;
+        setIncomingCall(null);
+        setActiveCall(callInfo);
+
+        let iceSeq = 0;
+        const poll = setInterval(async () => {
+          try {
+            const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${savedCall.call_id}&since_caller=${iceSeq}&since_callee=0`, { headers: { "X-Session-Token": token } });
+            const d = await r.json();
+            if (d.status === 'ended') { clearInterval(poll); stopCall(callInfo); return; }
+            if (d.ice && Array.isArray(d.ice) && d.ice.length > 0) {
+              for (const c of d.ice) {
+                try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_ignored) { /* bad candidate */ }
+              }
+              iceSeq = d.ice_seq;
+            }
+          } catch (_ignored) { /* poll error */ }
+        }, 1500);
+
+        pc.onicecandidate = async e => {
+          if (e.candidate) {
+            try {
+              await fetchWithTimeout(SIGNALING_URL + "?action=ice", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Session-Token": token },
+                body: JSON.stringify({ call_id: savedCall.call_id, candidate: e.candidate.toJSON() }),
+              });
+            } catch (_ignored) { /* ice send error */ }
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            clearInterval(poll);
+            stopCall(callInfo);
+          }
+        };
+      }
+    } catch (_ignored) {
       await fetchWithTimeout(SIGNALING_URL + "?action=reject", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Token": token },
-        body: JSON.stringify({ call_id: incomingCall.call_id }),
-      }).catch(() => {});
+        body: JSON.stringify({ call_id: savedCall.call_id }),
+      }).catch(() => { /* ignore */ });
       setIncomingCall(null);
     }
   }

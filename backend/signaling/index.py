@@ -1,16 +1,25 @@
 """
 WebRTC сигнальный сервер: инициация звонков, обмен offer/answer/ICE кандидатами.
+Улучшения: call_type, инкрементальный обмен ICE (seq), TURN-серверы, один DB-запрос на статус.
 """
 import json
 import os
 import psycopg2
-from datetime import datetime, timedelta
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Session-Token',
 }
+
+ICE_SERVERS = [
+    {'urls': 'stun:stun.l.google.com:19302'},
+    {'urls': 'stun:stun1.l.google.com:19302'},
+    {'urls': 'stun:stun.cloudflare.com:3478'},
+    {'urls': 'turn:openrelay.metered.ca:80',  'username': 'openrelayproject', 'credential': 'openrelayproject'},
+    {'urls': 'turn:openrelay.metered.ca:443', 'username': 'openrelayproject', 'credential': 'openrelayproject'},
+    {'urls': 'turn:openrelay.metered.ca:443?transport=tcp', 'username': 'openrelayproject', 'credential': 'openrelayproject'},
+]
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -33,7 +42,7 @@ def get_user_by_token(cur, schema, token):
     return cur.fetchone()
 
 def handler(event: dict, context) -> dict:
-    """Сигнальный сервер для WebRTC звонков: старт, ответ, ICE-кандидаты, статус, завершение."""
+    """Сигнальный сервер для WebRTC звонков: старт, ответ, ICE, статус, завершение."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
 
@@ -65,7 +74,7 @@ def handler(event: dict, context) -> dict:
     # Убираем зависшие звонки старше 90 секунд
     cur.execute(
         f'''UPDATE "{schema}".calls SET status = 'missed'
-            WHERE status IN ('calling') AND created_at < NOW() - INTERVAL '90 seconds' ''',
+            WHERE status = 'calling' AND created_at < NOW() - INTERVAL '90 seconds' ''',
     )
     conn.commit()
 
@@ -73,11 +82,13 @@ def handler(event: dict, context) -> dict:
     if method == 'POST' and action == 'call':
         callee_id = body.get('callee_id')
         offer = body.get('offer')
+        call_type = body.get('call_type', 'video')
+        if call_type not in ('video', 'audio'):
+            call_type = 'video'
         if not callee_id or not offer:
             cur.close(); conn.close()
             return json_response(400, {'error': 'callee_id и offer обязательны'})
 
-        # Завершить предыдущие активные звонки этого пользователя
         cur.execute(
             f'''UPDATE "{schema}".calls SET status = 'ended'
                 WHERE (caller_id = %s OR callee_id = %s) AND status IN ('calling', 'active')''',
@@ -85,9 +96,9 @@ def handler(event: dict, context) -> dict:
         )
 
         cur.execute(
-            f'''INSERT INTO "{schema}".calls (caller_id, callee_id, status, offer, updated_at)
-                VALUES (%s, %s, 'calling', %s, NOW()) RETURNING id''',
-            (my_id, callee_id, json.dumps(offer))
+            f'''INSERT INTO "{schema}".calls (caller_id, callee_id, status, offer, call_type, updated_at)
+                VALUES (%s, %s, 'calling', %s, %s, NOW()) RETURNING id''',
+            (my_id, callee_id, json.dumps(offer), call_type)
         )
         call_id = cur.fetchone()[0]
         conn.commit()
@@ -101,12 +112,13 @@ def handler(event: dict, context) -> dict:
         return json_response(200, {
             'call_id': call_id,
             'caller': {'id': my_id, 'username': caller[0], 'display_name': caller[1], 'avatar_url': caller[2]},
+            'ice_servers': ICE_SERVERS,
         })
 
     # GET ?action=incoming — проверить входящий звонок
     if method == 'GET' and action == 'incoming':
         cur.execute(
-            f'''SELECT c.id, c.caller_id, u.username, u.display_name, u.avatar_url, c.offer
+            f'''SELECT c.id, c.caller_id, u.username, u.display_name, u.avatar_url, c.offer, c.call_type
                 FROM "{schema}".calls c
                 JOIN "{schema}".users u ON u.id = c.caller_id
                 WHERE c.callee_id = %s AND c.status = 'calling'
@@ -122,7 +134,9 @@ def handler(event: dict, context) -> dict:
                 'call_id': row[0],
                 'caller': {'id': row[1], 'username': row[2], 'display_name': row[3], 'avatar_url': row[4]},
                 'offer': json.loads(row[5]) if row[5] else None,
-            }
+                'call_type': row[6] or 'video',
+            },
+            'ice_servers': ICE_SERVERS,
         })
 
     # POST ?action=answer — принять звонок
@@ -139,7 +153,7 @@ def handler(event: dict, context) -> dict:
         )
         conn.commit()
         cur.close(); conn.close()
-        return json_response(200, {'ok': True})
+        return json_response(200, {'ok': True, 'ice_servers': ICE_SERVERS})
 
     # POST ?action=reject — отклонить звонок
     if method == 'POST' and action == 'reject':
@@ -171,7 +185,7 @@ def handler(event: dict, context) -> dict:
         cur.close(); conn.close()
         return json_response(200, {'ok': True})
 
-    # POST ?action=ice — добавить ICE-кандидат
+    # POST ?action=ice — добавить ICE-кандидат (инкрементально по seq)
     if method == 'POST' and action == 'ice':
         call_id = body.get('call_id')
         candidate = body.get('candidate')
@@ -180,7 +194,7 @@ def handler(event: dict, context) -> dict:
             return json_response(400, {'error': 'call_id и candidate обязательны'})
 
         cur.execute(
-            f'SELECT caller_id, callee_id, caller_ice, callee_ice FROM "{schema}".calls WHERE id = %s',
+            f'SELECT caller_id, callee_id, caller_ice, callee_ice, caller_ice_seq, callee_ice_seq FROM "{schema}".calls WHERE id = %s',
             (call_id,)
         )
         row = cur.fetchone()
@@ -188,33 +202,38 @@ def handler(event: dict, context) -> dict:
             cur.close(); conn.close()
             return json_response(404, {'error': 'Звонок не найден'})
 
-        caller_id, callee_id, caller_ice, callee_ice = row
+        caller_id, callee_id, caller_ice, callee_ice, caller_seq, callee_seq = row
         if my_id == caller_id:
             ice_list = json.loads(caller_ice or '[]')
             ice_list.append(candidate)
             cur.execute(
-                f'UPDATE "{schema}".calls SET caller_ice = %s, updated_at = NOW() WHERE id = %s',
+                f'UPDATE "{schema}".calls SET caller_ice = %s, caller_ice_seq = caller_ice_seq + 1, updated_at = NOW() WHERE id = %s',
                 (json.dumps(ice_list), call_id)
             )
         else:
             ice_list = json.loads(callee_ice or '[]')
             ice_list.append(candidate)
             cur.execute(
-                f'UPDATE "{schema}".calls SET callee_ice = %s, updated_at = NOW() WHERE id = %s',
+                f'UPDATE "{schema}".calls SET callee_ice = %s, callee_ice_seq = callee_ice_seq + 1, updated_at = NOW() WHERE id = %s',
                 (json.dumps(ice_list), call_id)
             )
         conn.commit()
         cur.close(); conn.close()
         return json_response(200, {'ok': True})
 
-    # GET ?action=status&call_id=X — получить текущий статус звонка (answer + ICE)
+    # GET ?action=status&call_id=X&since_caller=N&since_callee=N — статус + инкрементальный ICE
     if method == 'GET' and action == 'status':
         call_id = qs.get('call_id')
         if not call_id:
             cur.close(); conn.close()
             return json_response(400, {'error': 'call_id обязателен'})
+
+        since_caller = int(qs.get('since_caller', '0'))
+        since_callee = int(qs.get('since_callee', '0'))
+
         cur.execute(
-            f'''SELECT status, answer, caller_ice, callee_ice, caller_id, callee_id
+            f'''SELECT status, answer, caller_ice, callee_ice, caller_id, callee_id,
+                       caller_ice_seq, callee_ice_seq
                 FROM "{schema}".calls WHERE id = %s''',
             (call_id,)
         )
@@ -222,13 +241,30 @@ def handler(event: dict, context) -> dict:
         cur.close(); conn.close()
         if not row:
             return json_response(404, {'error': 'Звонок не найден'})
-        status, answer, caller_ice, callee_ice, caller_id, callee_id = row
-        is_caller = (my_id == caller_id)
-        return json_response(200, {
+
+        status, answer, caller_ice, callee_ice, caller_id, callee_id, caller_seq, callee_seq = row
+
+        # Отдаём только новые ICE-кандидаты (те, что пришли после since_*)
+        caller_ice_list = json.loads(caller_ice or '[]')
+        callee_ice_list = json.loads(callee_ice or '[]')
+
+        # Кто я — определяем какие ICE мне нужны (от противоположной стороны)
+        if my_id == caller_id:
+            new_ice = callee_ice_list[since_callee:]
+            new_seq = callee_seq
+        else:
+            new_ice = caller_ice_list[since_caller:]
+            new_seq = caller_seq
+
+        result = {
             'status': status,
-            'answer': json.loads(answer) if answer else None,
-            'ice': json.loads(callee_ice or '[]') if is_caller else json.loads(caller_ice or '[]'),
-        })
+            'ice': new_ice,
+            'ice_seq': new_seq,
+        }
+        if answer and my_id == caller_id:
+            result['answer'] = json.loads(answer)
+
+        return json_response(200, result)
 
     cur.close(); conn.close()
-    return json_response(400, {'error': 'Неизвестное действие'})
+    return json_response(404, {'error': 'Неизвестный action'})
