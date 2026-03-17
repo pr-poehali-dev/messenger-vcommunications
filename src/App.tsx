@@ -321,9 +321,14 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   return (
     <div className="flex flex-col h-full animate-slide-in-right">
       {offline && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/20 text-yellow-400 text-xs">
-          <Icon name="WifiOff" size={13} />
-          Нет соединения — пытаемся восстановить...
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-300 text-xs animate-pulse">
+          <Icon name="WifiOff" size={13} className="shrink-0" />
+          <span>Нет соединения — пытаемся восстановить...</span>
+          <span className="ml-auto flex gap-0.5">
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+          </span>
         </div>
       )}
       <div className="glass-strong px-4 py-3 flex items-center gap-3 border-b border-border/50">
@@ -812,9 +817,14 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   return (
     <div className="flex flex-col h-full">
       {offline && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/20 text-yellow-400 text-xs">
-          <Icon name="WifiOff" size={13} />
-          Нет соединения — пытаемся восстановить...
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-300 text-xs animate-pulse">
+          <Icon name="WifiOff" size={13} className="shrink-0" />
+          <span>Нет соединения — пытаемся восстановить...</span>
+          <span className="ml-auto flex gap-0.5">
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+          </span>
         </div>
       )}
       <div className="px-4 py-4 space-y-3">
