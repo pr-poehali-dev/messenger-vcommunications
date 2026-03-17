@@ -458,7 +458,7 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
             onClick={() => { setMenuOpen(false); onOpen(); }}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left rounded-lg"
           >
-            <Icon name="MessageCircle" size={15} className="text-muted-foreground" />
+            <Icon name="MessageCircle" size={15} className="text-blue-400" />
             Открыть чат
           </button>
           {!archived && (
@@ -466,7 +466,7 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
               onClick={() => { setMenuOpen(false); onPin?.(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left rounded-lg"
             >
-              <Icon name={pinned ? "PinOff" : "Pin"} size={15} className="text-muted-foreground" />
+              <Icon name={pinned ? "PinOff" : "Pin"} size={15} className="text-yellow-400" />
               {pinned ? "Открепить" : "Закрепить"}
             </button>
           )}
@@ -474,22 +474,22 @@ function ChatRow({ chat, onOpen, onArchive, onUnarchive, archived, pinned, muted
             onClick={() => { setMenuOpen(false); onMute?.(); }}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left rounded-lg"
           >
-            <Icon name={muted ? "Bell" : "BellOff"} size={15} className="text-muted-foreground" />
+            <Icon name={muted ? "Bell" : "BellOff"} size={15} className="text-green-400" />
             {muted ? "Включить звук" : "Заглушить"}
           </button>
           <button
             onClick={() => { setMenuOpen(false); onLock?.(); }}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left rounded-lg"
           >
-            <Icon name={locked ? "LockOpen" : "Lock"} size={15} className="text-muted-foreground" />
+            <Icon name={locked ? "LockOpen" : "Lock"} size={15} className="text-purple-400" />
             {locked ? "Снять блокировку" : "Закрыть чат"}
           </button>
           <div className="border-t border-border/40 my-0.5" />
           <button
             onClick={() => { setMenuOpen(false); if (archived) { onUnarchive?.(); } else { onArchive?.(); } }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left rounded-lg"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-red-500/10 text-red-400 transition-colors text-left rounded-lg"
           >
-            <Icon name={archived ? "ArchiveRestore" : "Archive"} size={15} className="text-muted-foreground" />
+            <Icon name={archived ? "ArchiveRestore" : "Archive"} size={15} className="text-red-400" />
             {archived ? "Восстановить" : "В архив"}
           </button>
         </div>
