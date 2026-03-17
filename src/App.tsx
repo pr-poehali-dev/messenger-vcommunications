@@ -237,6 +237,8 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   const [sending, setSending] = useState(false);
   const [onlineStatus, setOnlineStatus] = useState<{ online: boolean; last_seen: string | null } | null>(null);
   const [offline, setOffline] = useState(false);
+  const [reconnected, setReconnected] = useState(false);
+  const wasOfflineRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onlineRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -267,8 +269,13 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
           if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
         }
       }
-    } catch (_) { setOffline(true); return; }
+    } catch (_) { setOffline(true); wasOfflineRef.current = true; return; }
     setOffline(false);
+    if (wasOfflineRef.current) {
+      wasOfflineRef.current = false;
+      setReconnected(true);
+      setTimeout(() => setReconnected(false), 2500);
+    }
   }
 
   async function loadOnlineStatus() {
@@ -329,6 +336,12 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
             <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "150ms" }} />
             <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "300ms" }} />
           </span>
+        </div>
+      )}
+      {reconnected && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-300 text-xs animate-pulse">
+          <Icon name="Wifi" size={13} className="shrink-0" />
+          <span>Соединение восстановлено</span>
         </div>
       )}
       <div className="glass-strong px-4 py-3 flex items-center gap-3 border-b border-border/50">
@@ -685,6 +698,8 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   const [newChatQuery, setNewChatQuery] = useState("");
   const [newChatResults, setNewChatResults] = useState<OtherUser[]>([]);
   const [offline, setOffline] = useState(false);
+  const [reconnected, setReconnected] = useState(false);
+  const wasOfflineRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = localStorage.getItem("auth_token") || "";
 
@@ -709,7 +724,13 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
         prevUnreadRef.current = Object.fromEntries((data.conversations as Conversation[]).map(c => [c.id, c.unread]));
         setConversations(data.conversations);
       }
-    } catch (_) { setOffline(true); }
+    } catch (_) { setOffline(true); wasOfflineRef.current = true; setLoading(false); return; }
+    setOffline(false);
+    if (wasOfflineRef.current) {
+      wasOfflineRef.current = false;
+      setReconnected(true);
+      setTimeout(() => setReconnected(false), 2500);
+    }
     setLoading(false);
   }
 
@@ -825,6 +846,12 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
             <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "150ms" }} />
             <span className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce" style={{ animationDelay: "300ms" }} />
           </span>
+        </div>
+      )}
+      {reconnected && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-300 text-xs animate-pulse">
+          <Icon name="Wifi" size={13} className="shrink-0" />
+          <span>Соединение восстановлено</span>
         </div>
       )}
       <div className="px-4 py-4 space-y-3">
