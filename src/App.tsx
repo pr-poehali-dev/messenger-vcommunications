@@ -242,35 +242,39 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   const token = localStorage.getItem("auth_token") || "";
 
   async function loadMessages(after?: number) {
-    const url = after
-      ? `${MESSAGES_URL}?action=messages&conv_id=${convId}&after=${after}`
-      : `${MESSAGES_URL}?action=messages&conv_id=${convId}`;
-    const res = await fetch(url, { headers: { "X-Session-Token": token } });
-    const data = await res.json();
-    if (data.messages) {
-      if (after) {
-        if (data.messages.length > 0) {
-          const incoming = (data.messages as RealMessage[]).filter(m => m.sender_id !== myId);
-          if (incoming.length > 0) {
-            playNotification();
-            const last = incoming[incoming.length - 1];
-            const name = otherUser.display_name || `@${otherUser.username}`;
-            showPushNotification(name, last.text, otherUser.avatar_url);
+    try {
+      const url = after
+        ? `${MESSAGES_URL}?action=messages&conv_id=${convId}&after=${after}`
+        : `${MESSAGES_URL}?action=messages&conv_id=${convId}`;
+      const res = await fetch(url, { headers: { "X-Session-Token": token } });
+      const data = await res.json();
+      if (data.messages) {
+        if (after) {
+          if (data.messages.length > 0) {
+            const incoming = (data.messages as RealMessage[]).filter(m => m.sender_id !== myId);
+            if (incoming.length > 0) {
+              playNotification();
+              const last = incoming[incoming.length - 1];
+              const name = otherUser.display_name || `@${otherUser.username}`;
+              showPushNotification(name, last.text, otherUser.avatar_url);
+            }
+            setMessages(prev => [...prev, ...data.messages]);
+            setLastId(data.messages[data.messages.length - 1].id);
           }
-          setMessages(prev => [...prev, ...data.messages]);
-          setLastId(data.messages[data.messages.length - 1].id);
+        } else {
+          setMessages(data.messages);
+          if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
         }
-      } else {
-        setMessages(data.messages);
-        if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
       }
-    }
+    } catch (_) { /* network error, retry on next poll */ }
   }
 
   async function loadOnlineStatus() {
-    const res = await fetch(`${MESSAGES_URL}?action=online&user_id=${otherUser.id}`, { headers: { "X-Session-Token": token } });
-    const data = await res.json();
-    if ('online' in data) setOnlineStatus(data);
+    try {
+      const res = await fetch(`${MESSAGES_URL}?action=online&user_id=${otherUser.id}`, { headers: { "X-Session-Token": token } });
+      const data = await res.json();
+      if ('online' in data) setOnlineStatus(data);
+    } catch (_) { /* network error */ }
   }
 
   useEffect(() => {
@@ -295,16 +299,18 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
     if (!text || sending) return;
     setSending(true);
     setInput("");
-    const res = await fetch(`${MESSAGES_URL}?action=send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Token": token },
-      body: JSON.stringify({ to_user_id: otherUser.id, text }),
-    });
-    const data = await res.json();
-    if (data.message) {
-      setMessages(prev => [...prev, data.message]);
-      setLastId(data.message.id);
-    }
+    try {
+      const res = await fetch(`${MESSAGES_URL}?action=send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ to_user_id: otherUser.id, text }),
+      });
+      const data = await res.json();
+      if (data.message) {
+        setMessages(prev => [...prev, data.message]);
+        setLastId(data.message.id);
+      }
+    } catch (_) { /* ignore send error */ }
     setSending(false);
   }
 
@@ -671,22 +677,24 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   const prevUnreadRef = useRef<Record<number, number>>({});
 
   async function loadConversations(notify = false) {
-    const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
-    const data = await res.json();
-    if (data.conversations) {
-      if (notify) {
-        for (const conv of data.conversations as Conversation[]) {
-          const prevUnread = prevUnreadRef.current[conv.id] ?? conv.unread;
-          if (conv.unread > prevUnread && conv.last_message && !conv.last_message.mine) {
-            const name = conv.other_user.display_name || `@${conv.other_user.username}`;
-            playNotification();
-            showPushNotification(name, conv.last_message.text, conv.other_user.avatar_url);
+    try {
+      const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
+      const data = await res.json();
+      if (data.conversations) {
+        if (notify) {
+          for (const conv of data.conversations as Conversation[]) {
+            const prevUnread = prevUnreadRef.current[conv.id] ?? conv.unread;
+            if (conv.unread > prevUnread && conv.last_message && !conv.last_message.mine) {
+              const name = conv.other_user.display_name || `@${conv.other_user.username}`;
+              playNotification();
+              showPushNotification(name, conv.last_message.text, conv.other_user.avatar_url);
+            }
           }
         }
+        prevUnreadRef.current = Object.fromEntries((data.conversations as Conversation[]).map(c => [c.id, c.unread]));
+        setConversations(data.conversations);
       }
-      prevUnreadRef.current = Object.fromEntries((data.conversations as Conversation[]).map(c => [c.id, c.unread]));
-      setConversations(data.conversations);
-    }
+    } catch (_) { /* network error, retry on next poll */ }
     setLoading(false);
   }
 
@@ -699,24 +707,28 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
 
   async function searchUsers(q: string) {
     if (q.length < 2) { setNewChatResults([]); return; }
-    const res = await fetch(`${MESSAGES_URL}?action=search&q=${encodeURIComponent(q)}`, { headers: { "X-Session-Token": token } });
-    const data = await res.json();
-    if (data.users) setNewChatResults(data.users);
+    try {
+      const res = await fetch(`${MESSAGES_URL}?action=search&q=${encodeURIComponent(q)}`, { headers: { "X-Session-Token": token } });
+      const data = await res.json();
+      if (data.users) setNewChatResults(data.users);
+    } catch (_) { /* ignore */ }
   }
 
   async function openOrCreateConv(user: OtherUser) {
-    const res = await fetch(`${MESSAGES_URL}?action=open_conv`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Token": token },
-      body: JSON.stringify({ to_user_id: user.id }),
-    });
-    const data = await res.json();
-    if (data.conv_id) {
-      setNewChat(false);
-      setNewChatQuery("");
-      setNewChatResults([]);
-      setOpenConv({ convId: data.conv_id, otherUser: user });
-    }
+    try {
+      const res = await fetch(`${MESSAGES_URL}?action=open_conv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ to_user_id: user.id }),
+      });
+      const data = await res.json();
+      if (data.conv_id) {
+        setNewChat(false);
+        setNewChatQuery("");
+        setNewChatResults([]);
+        setOpenConv({ convId: data.conv_id, otherUser: user });
+      }
+    } catch (_) { /* ignore */ }
   }
 
   const filteredConvs = searchQuery.length >= 2
@@ -1155,16 +1167,18 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
     setAvatarUploading(true);
     const reader = new FileReader();
     reader.onload = async () => {
-      const base64 = (reader.result as string).split(",")[1];
-      const res = await fetch(UPLOAD_AVATAR_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Session-Token": token },
-        body: JSON.stringify({ image: base64, contentType: "image/jpeg" }),
-      });
-      const data = await res.json();
-      if (data.avatar_url) {
-        onAvatarUpdate?.(data.avatar_url);
-      }
+      try {
+        const base64 = (reader.result as string).split(",")[1];
+        const res = await fetch(UPLOAD_AVATAR_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Session-Token": token },
+          body: JSON.stringify({ image: base64, contentType: "image/jpeg" }),
+        });
+        const data = await res.json();
+        if (data.avatar_url) {
+          onAvatarUpdate?.(data.avatar_url);
+        }
+      } catch (_) { /* ignore */ }
       setAvatarUploading(false);
     };
     reader.readAsDataURL(blob);
@@ -1174,15 +1188,17 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
     const token = localStorage.getItem("auth_token");
     if (!token) return;
     setAvatarUploading(true);
-    const res = await fetch(UPLOAD_AVATAR_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Token": token },
-      body: JSON.stringify({ action: "delete" }),
-    });
-    const data = await res.json();
-    if (!data.error) {
-      onAvatarUpdate?.(null as unknown as string);
-    }
+    try {
+      const res = await fetch(UPLOAD_AVATAR_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = await res.json();
+      if (!data.error) {
+        onAvatarUpdate?.(null as unknown as string);
+      }
+    } catch (_) { /* ignore */ }
     setAvatarUploading(false);
   }
 
@@ -1190,13 +1206,15 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
     const token = localStorage.getItem("auth_token");
     if (!token || !authUser) return;
     setSaving(true);
-    const res = await fetch(UPDATE_PROFILE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Token": token },
-      body: JSON.stringify({ display_name: nameValue }),
-    });
-    const data = await res.json();
-    if (data.user) onProfileUpdate?.(data.user);
+    try {
+      const res = await fetch(UPDATE_PROFILE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ display_name: nameValue }),
+      });
+      const data = await res.json();
+      if (data.user) onProfileUpdate?.(data.user);
+    } catch (_) { /* ignore */ }
     setSaving(false);
     setEditingName(false);
   }
@@ -1205,13 +1223,15 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
     const token = localStorage.getItem("auth_token");
     if (!token || !authUser) return;
     setSaving(true);
-    const res = await fetch(UPDATE_PROFILE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Token": token },
-      body: JSON.stringify({ status: statusValue }),
-    });
-    const data = await res.json();
-    if (data.user) onProfileUpdate?.(data.user);
+    try {
+      const res = await fetch(UPDATE_PROFILE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ status: statusValue }),
+      });
+      const data = await res.json();
+      if (data.user) onProfileUpdate?.(data.user);
+    } catch (_) { /* ignore */ }
     setSaving(false);
     setEditingStatus(false);
   }
