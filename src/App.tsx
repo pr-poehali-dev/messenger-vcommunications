@@ -1126,6 +1126,22 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
     reader.readAsDataURL(blob);
   }
 
+  async function handleDeleteAvatar() {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    setAvatarUploading(true);
+    const res = await fetch(UPLOAD_AVATAR_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Token": token },
+      body: JSON.stringify({ action: "delete" }),
+    });
+    const data = await res.json();
+    if (!data.error) {
+      onAvatarUpdate?.(null as unknown as string);
+    }
+    setAvatarUploading(false);
+  }
+
   const features = [
     { icon: "Shield", label: "Шифрование", desc: "Сквозная защита", color: "text-emerald-400" },
     { icon: "RefreshCw", label: "Синхронизация", desc: "Все устройства", color: "text-blue-400" },
@@ -1166,6 +1182,14 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
                 <Icon name="Camera" size={13} className="text-white" />
               )}
             </button>
+            {authUser?.avatar_url && !avatarUploading && (
+              <button
+                onClick={handleDeleteAvatar}
+                className="absolute -top-1 -right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center shadow-md"
+              >
+                <Icon name="X" size={10} className="text-white" />
+              </button>
+            )}
             <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
           </div>
           <div className="flex-1">
@@ -1502,7 +1526,7 @@ export default function App() {
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url ?? null }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
     }
   };
 

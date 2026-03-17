@@ -1,6 +1,6 @@
 """
-Загрузка и обновление аватара пользователя.
-Принимает base64-изображение, сохраняет в S3, обновляет avatar_url в БД.
+Загрузка, обновление и удаление аватара пользователя.
+Принимает base64-изображение (action=upload) или удаляет аватар (action=delete).
 """
 import json
 import os
@@ -26,7 +26,7 @@ def json_response(status: int, data: dict) -> dict:
     }
 
 def handler(event: dict, context) -> dict:
-    """Загрузка аватара пользователя в S3 и обновление ссылки в профиле."""
+    """Загрузка или удаление аватара пользователя."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
 
@@ -41,12 +41,6 @@ def handler(event: dict, context) -> dict:
         except Exception:
             return json_response(400, {'error': 'Неверный формат запроса'})
 
-    image_data = body.get('image')
-    content_type = body.get('contentType', 'image/jpeg')
-
-    if not image_data:
-        return json_response(400, {'error': 'Изображение не передано'})
-
     schema = os.environ.get('MAIN_DB_SCHEMA', 'public')
     conn = get_conn()
     cur = conn.cursor()
@@ -60,6 +54,20 @@ def handler(event: dict, context) -> dict:
         return json_response(401, {'error': 'Сессия истекла'})
 
     user_id = row[0]
+    action = body.get('action', 'upload')
+
+    if action == 'delete':
+        cur.execute(f'UPDATE "{schema}".users SET avatar_url = NULL WHERE id = %s', (user_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return json_response(200, {'avatar_url': None})
+
+    image_data = body.get('image')
+    content_type = body.get('contentType', 'image/jpeg')
+
+    if not image_data:
+        cur.close(); conn.close()
+        return json_response(400, {'error': 'Изображение не передано'})
 
     ext = content_type.split('/')[-1]
     if ext == 'jpeg':
