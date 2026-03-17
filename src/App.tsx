@@ -203,6 +203,16 @@ function UserAvatar({ user, size = 10 }: { user: OtherUser; size?: number }) {
   );
 }
 
+function fmtLastSeen(last_seen: string) {
+  const d = new Date(last_seen);
+  const now = new Date();
+  const diff = (now.getTime() - d.getTime()) / 1000;
+  if (diff < 60) return "только что";
+  if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+  if (diff < 86400 && d.getDate() === now.getDate()) return `в ${d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}`;
+  return `${d.toLocaleDateString("ru", { day: "numeric", month: "short" })}`;
+}
+
 function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: {
   convId: number; otherUser: OtherUser; myId: number; onBack: () => void;
   hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void;
@@ -211,8 +221,10 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   const [messages, setMessages] = useState<RealMessage[]>([]);
   const [lastId, setLastId] = useState(0);
   const [sending, setSending] = useState(false);
+  const [onlineStatus, setOnlineStatus] = useState<{ online: boolean; last_seen: string | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onlineRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = localStorage.getItem("auth_token") || "";
 
   async function loadMessages(after?: number) {
@@ -234,12 +246,23 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
     }
   }
 
+  async function loadOnlineStatus() {
+    const res = await fetch(`${MESSAGES_URL}?action=online&user_id=${otherUser.id}`, { headers: { "X-Session-Token": token } });
+    const data = await res.json();
+    if ('online' in data) setOnlineStatus(data);
+  }
+
   useEffect(() => {
     loadMessages();
     pollRef.current = setInterval(() => {
       setLastId(prev => { loadMessages(prev); return prev; });
     }, 2500);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    loadOnlineStatus();
+    onlineRef.current = setInterval(loadOnlineStatus, 30000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (onlineRef.current) clearInterval(onlineRef.current);
+    };
   }, [convId]);
 
   useEffect(() => {
@@ -272,10 +295,23 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
           <Icon name="ChevronLeft" size={20} />
         </button>
-        <UserAvatar user={otherUser} size={10} />
+        <div className="relative">
+          <UserAvatar user={otherUser} size={10} />
+          {!hideOnlineStatus && onlineStatus?.online && (
+            <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-background" />
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-sm truncate">{displayName}</div>
-          <div className="text-xs text-muted-foreground">@{otherUser.username}</div>
+          <div className="text-xs text-muted-foreground">
+            {hideOnlineStatus
+              ? `@${otherUser.username}`
+              : onlineStatus?.online
+                ? <span className="text-emerald-400">В сети</span>
+                : onlineStatus?.last_seen
+                  ? `был(а) ${fmtLastSeen(onlineStatus.last_seen)}`
+                  : `@${otherUser.username}`}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
@@ -1521,6 +1557,17 @@ export default function App() {
   }
 
   const [activeTab, setActiveTab] = useState<Tab>("chats");
+
+  // ping — обновляем last_seen каждые 30 сек
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
+    const ping = () => fetch(`${MESSAGES_URL}?action=ping`, { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+    ping();
+    const id = setInterval(ping, 30000);
+    return () => clearInterval(id);
+  }, [authUser]);
+
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>({
     contact: CONTACTS[0],
     type: "video",

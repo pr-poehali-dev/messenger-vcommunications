@@ -33,7 +33,7 @@ def get_user_by_token(cur, schema, token):
     return cur.fetchone()
 
 def handler(event: dict, context) -> dict:
-    """Управление чатами: список, история, отправка сообщений, поиск пользователей."""
+    """Управление чатами: список, история, отправка сообщений, поиск пользователей, онлайн-статус."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
 
@@ -62,6 +62,28 @@ def handler(event: dict, context) -> dict:
         return json_response(401, {'error': 'Сессия истекла'})
 
     my_id = me[0]
+
+    # POST ?action=ping — обновить last_seen (вызывать каждые ~30 сек с фронта)
+    if method == 'POST' and action == 'ping':
+        cur.execute(f'UPDATE "{schema}".users SET last_seen_at = NOW() WHERE id = %s', (my_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return json_response(200, {'ok': True})
+
+    # GET ?action=online&user_id=X — получить статус онлайн пользователя
+    if method == 'GET' and action == 'online':
+        user_id = qs.get('user_id')
+        if not user_id:
+            cur.close(); conn.close()
+            return json_response(400, {'error': 'user_id обязателен'})
+        cur.execute(f'SELECT last_seen_at FROM "{schema}".users WHERE id = %s', (user_id,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row or not row[0]:
+            return json_response(200, {'online': False, 'last_seen': None})
+        diff = (datetime.utcnow() - row[0]).total_seconds()
+        online = diff < 60
+        return json_response(200, {'online': online, 'last_seen': str(row[0])})
 
     # GET ?action=conversations — список чатов
     if method == 'GET' and action == 'conversations':
