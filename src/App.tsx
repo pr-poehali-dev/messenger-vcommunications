@@ -6,6 +6,7 @@ import ImageCropModal from "@/components/ImageCropModal";
 const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
 const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb-09980e8a9c27";
 const UPDATE_PROFILE_URL = "https://functions.poehali.dev/906e9817-4957-4d99-9bc2-082e8b2d03df";
+const MESSAGES_URL = "https://functions.poehali.dev/2bd34809-22df-4f72-8b11-90ec52d3b5d0";
 
 interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; display_name?: string | null; status?: string | null; }
 
@@ -179,89 +180,91 @@ function VoiceBubble({ url, duration, out }: { url: string; duration: number; ou
   );
 }
 
-function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: { chatId: number; onBack: () => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void }) {
+interface RealMessage { id: number; sender_id: number; text: string; at: string; read: boolean; }
+interface OtherUser { id: number; username: string; display_name?: string | null; avatar_url?: string | null; }
+
+function fmtMsgTime(at: string) {
+  const d = new Date(at);
+  return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+}
+
+function UserAvatar({ user, size = 10 }: { user: OtherUser; size?: number }) {
+  const initials = (user.display_name || user.username).slice(0, 2).toUpperCase();
+  const colors = ["from-purple-500 to-pink-500", "from-blue-500 to-cyan-500", "from-emerald-500 to-teal-500", "from-orange-500 to-red-500", "from-violet-500 to-purple-600"];
+  const color = colors[user.id % colors.length];
+  const sz = `w-${size} h-${size}`;
+  return (
+    <div className={`${sz} rounded-full bg-gradient-to-br ${color} flex items-center justify-center text-white font-bold overflow-hidden flex-shrink-0`}
+      style={{ fontSize: size <= 8 ? 10 : 13 }}>
+      {user.avatar_url
+        ? <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+        : initials}
+    </div>
+  );
+}
+
+function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: {
+  convId: number; otherUser: OtherUser; myId: number; onBack: () => void;
+  hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void;
+}) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState(MESSAGES[chatId] || []);
-  const [typing, setTyping] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
+  const [messages, setMessages] = useState<RealMessage[]>([]);
+  const [lastId, setLastId] = useState(0);
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const mediaRecRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chat = CHATS.find(c => c.id === chatId)!;
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const token = localStorage.getItem("auth_token") || "";
+
+  async function loadMessages(after?: number) {
+    const url = after
+      ? `${MESSAGES_URL}?action=messages&conv_id=${convId}&after=${after}`
+      : `${MESSAGES_URL}?action=messages&conv_id=${convId}`;
+    const res = await fetch(url, { headers: { "X-Session-Token": token } });
+    const data = await res.json();
+    if (data.messages) {
+      if (after) {
+        if (data.messages.length > 0) {
+          setMessages(prev => [...prev, ...data.messages]);
+          setLastId(data.messages[data.messages.length - 1].id);
+        }
+      } else {
+        setMessages(data.messages);
+        if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
+      }
+    }
+  }
+
+  useEffect(() => {
+    loadMessages();
+    pollRef.current = setInterval(() => {
+      setLastId(prev => { loadMessages(prev); return prev; });
+    }, 2500);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [convId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+  }, [messages]);
 
-  useEffect(() => () => {
-    mediaRecRef.current?.stop();
-    if (timerRef.current) clearInterval(timerRef.current);
-  }, []);
-
-  function sendReply(id: number) {
-    setTyping(true);
-    setTimeout(() => {
-      const replies = REPLIES[chatId] || ["Ок!", "Понял!", "Спасибо!"];
-      const reply = replies[Math.floor(Math.random() * replies.length)];
-      setTyping(false);
-      playNotification();
-      setMessages(prev => [...prev, { id: id + 1, text: reply, out: false, time: getNow() }]);
-    }, 1200 + Math.random() * 800);
-  }
-
-  function sendMessage() {
+  async function sendMessage() {
     const text = input.trim();
-    if (!text) return;
-    const newId = Date.now();
-    setMessages(prev => [...prev, { id: newId, text, out: true, time: getNow() }]);
+    if (!text || sending) return;
+    setSending(true);
     setInput("");
-    sendReply(newId);
-  }
-
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      chunksRef.current = [];
-      const mr = new MediaRecorder(stream);
-      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
-        const dur = recSeconds || 1;
-        const newId = Date.now();
-        setMessages(prev => [...prev, { id: newId, text: "", out: true, time: getNow(), voice: { url, duration: dur } }]);
-        setRecording(false);
-        setRecSeconds(0);
-        sendReply(newId);
-      };
-      mr.start();
-      mediaRecRef.current = mr;
-      setRecording(true);
-      setRecSeconds(0);
-      timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
-    } catch (e) { void e; }
-  }
-
-  function stopRecording() {
-    mediaRecRef.current?.stop();
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-  }
-
-  function cancelRecording() {
-    if (mediaRecRef.current) {
-      mediaRecRef.current.onstop = null;
-      mediaRecRef.current.stop();
-      mediaRecRef.current.stream?.getTracks().forEach(t => t.stop());
+    const res = await fetch(`${MESSAGES_URL}?action=send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Token": token },
+      body: JSON.stringify({ to_user_id: otherUser.id, text }),
+    });
+    const data = await res.json();
+    if (data.message) {
+      setMessages(prev => [...prev, data.message]);
+      setLastId(data.message.id);
     }
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    setRecording(false);
-    setRecSeconds(0);
+    setSending(false);
   }
 
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const displayName = otherUser.display_name || `@${otherUser.username}`;
 
   return (
     <div className="flex flex-col h-full animate-slide-in-right">
@@ -269,12 +272,10 @@ function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPriv
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
           <Icon name="ChevronLeft" size={20} />
         </button>
-        <Avatar initials={chat.contact.avatar} color={chat.contact.color} online={!hideOnlineStatus && chat.contact.online} />
+        <UserAvatar user={otherUser} size={10} />
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-sm truncate">{chat.contact.name}</div>
-          <div className="text-xs text-muted-foreground">
-            {typing ? <span className="text-neon-purple animate-pulse">печатает...</span> : (hideOnlineStatus ? chat.contact.status : (chat.contact.online ? "В сети" : chat.contact.status))}
-          </div>
+          <div className="font-semibold text-sm truncate">{displayName}</div>
+          <div className="text-xs text-muted-foreground">@{otherUser.username}</div>
         </div>
         <div className="flex items-center gap-1">
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
@@ -283,36 +284,31 @@ function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPriv
           <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
             <Icon name="Video" size={18} />
           </button>
-          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
-            <Icon name="MoreVertical" size={18} />
-          </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 mesh-bg">
-        {messages.map((msg, i) => (
-          <div key={msg.id} className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in`} style={{ animationDelay: `${i * 0.05}s` }}>
-            <div className={`max-w-[72%] px-4 py-2.5 shadow-lg ${msg.out ? "msg-bubble-out text-white" : "msg-bubble-in text-foreground"}`}>
-              {msg.voice
-                ? <VoiceBubble url={msg.voice.url} duration={msg.voice.duration} out={msg.out} />
-                : <p className="text-sm leading-relaxed">{msg.text}</p>
-              }
-              <div className={`flex items-center justify-end gap-1 mt-1 ${msg.out ? "text-white/60" : "text-muted-foreground"}`}>
-                <span className="text-[10px]">{msg.time}</span>
-                {msg.out && <Icon name="CheckCheck" size={12} />}
-              </div>
-            </div>
-          </div>
-        ))}
-        {typing && (
-          <div className="flex justify-start animate-fade-in">
-            <div className="msg-bubble-in px-4 py-3 shadow-lg flex gap-1 items-center">
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
-            </div>
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
+            <UserAvatar user={otherUser} size={16} />
+            <p className="text-sm font-semibold mt-2">{displayName}</p>
+            <p className="text-xs text-muted-foreground">Начните общение — напишите первое сообщение</p>
           </div>
         )}
+        {messages.map((msg) => {
+          const isOut = msg.sender_id === myId;
+          return (
+            <div key={msg.id} className={`flex ${isOut ? "justify-end" : "justify-start"} animate-fade-in`}>
+              <div className={`max-w-[72%] px-4 py-2.5 shadow-lg ${isOut ? "msg-bubble-out text-white" : "msg-bubble-in text-foreground"}`}>
+                <p className="text-sm leading-relaxed">{msg.text}</p>
+                <div className={`flex items-center justify-end gap-1 mt-1 ${isOut ? "text-white/60" : "text-muted-foreground"}`}>
+                  <span className="text-[10px]">{fmtMsgTime(msg.at)}</span>
+                  {isOut && <Icon name={msg.read ? "CheckCheck" : "Check"} size={12} />}
+                </div>
+              </div>
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -322,30 +318,10 @@ function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPriv
             <Icon name="Ban" size={15} className="text-muted-foreground flex-shrink-0" />
             <span className="text-xs text-muted-foreground">Вы запретили получать сообщения · <button onClick={() => { onBack(); onGoToPrivacy?.(); }} className="text-neon-purple hover:underline">Изменить</button></span>
           </div>
-        ) : recording ? (
-          <div className="flex items-center gap-3">
-            <button onClick={cancelRecording} className="p-2 rounded-xl text-red-400 hover:bg-red-500/10 transition-colors">
-              <Icon name="X" size={20} />
-            </button>
-            <div className="flex-1 flex items-center gap-2 bg-muted/50 border border-red-500/40 rounded-2xl px-4 py-2.5">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-              <span className="text-sm text-red-400 font-medium">{fmt(recSeconds)}</span>
-              <span className="text-xs text-muted-foreground ml-1">Запись...</span>
-            </div>
-            <button
-              onClick={stopRecording}
-              className="p-2.5 rounded-xl gradient-purple-blue text-white glow-purple transition-all"
-            >
-              <Icon name="Send" size={18} />
-            </button>
-          </div>
         ) : (
           <div className="flex items-center gap-2">
             <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-purple transition-colors">
               <Icon name="Smile" size={20} />
-            </button>
-            <button className="p-2 rounded-xl text-muted-foreground hover:text-neon-cyan transition-colors">
-              <Icon name="Paperclip" size={20} />
             </button>
             <input
               value={input}
@@ -354,15 +330,13 @@ function ChatView({ chatId, onBack, hideOnlineStatus, messagePrivacy, onGoToPriv
               placeholder="Написать сообщение..."
               className="flex-1 bg-muted/50 border border-border/50 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-neon-purple/60 transition-colors placeholder:text-muted-foreground"
             />
-            {input.trim() ? (
-              <button onClick={sendMessage} className="p-2.5 rounded-xl gradient-purple-blue text-white glow-purple transition-all">
-                <Icon name="Send" size={18} />
-              </button>
-            ) : (
-              <button onClick={startRecording} className="p-2.5 rounded-xl bg-muted text-muted-foreground hover:text-neon-purple hover:bg-neon-purple/10 transition-all">
-                <Icon name="Mic" size={20} />
-              </button>
-            )}
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || sending}
+              className="p-2.5 rounded-xl gradient-purple-blue text-white glow-purple transition-all disabled:opacity-40"
+            >
+              {sending ? <Icon name="Loader2" size={18} className="animate-spin" /> : <Icon name="Send" size={18} />}
+            </button>
           </div>
         )}
       </div>
@@ -608,149 +582,132 @@ function PinPad({ mode, onSuccess, onCancel, existingPin, title: titleProp }: {
   );
 }
 
+interface Conversation {
+  id: number;
+  other_user: OtherUser;
+  last_message: { text: string; at: string; mine: boolean } | null;
+  unread: number;
+}
+
+function fmtConvTime(at: string) {
+  const d = new Date(at);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  if (diff < 86400000 && d.getDate() === now.getDate()) return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+  if (diff < 172800000) return "вчера";
+  return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
+}
+
 function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null }) {
-  const [openChat, setOpenChat] = useState<number | null>(null);
-  const [archived, setArchived] = useState<number[]>([]);
-  const [pinned, setPinned] = useState<number[]>([]);
-  const [muted, setMuted] = useState<number[]>([]);
-  const [locked, setLocked] = useState<number[]>([]);
-  const globalPin = sharedPin;
-  const [showArchive, setShowArchive] = useState(false);
-  const [showLocked, setShowLocked] = useState(false);
-  const [pinPad, setPinPad] = useState<null | { mode: "set" | "enter" | "confirm"; chatId?: number; action?: "lock" | "unlock" | "open" | "view" }>(null);
-  const [unlockedSession, setUnlockedSession] = useState(false);
+  const [openConv, setOpenConv] = useState<{ convId: number; otherUser: OtherUser } | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<OtherUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [newChat, setNewChat] = useState(false);
+  const [newChatQuery, setNewChatQuery] = useState("");
+  const [newChatResults, setNewChatResults] = useState<OtherUser[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const token = localStorage.getItem("auth_token") || "";
 
-  if (openChat !== null) return <ChatView chatId={openChat} onBack={() => { setOpenChat(null); setUnlockedSession(false); }} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={onGoToPrivacy} />;
+  async function loadConversations() {
+    const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
+    const data = await res.json();
+    if (data.conversations) setConversations(data.conversations);
+    setLoading(false);
+  }
 
-  const activeChats = CHATS
-    .filter(c => !archived.includes(c.id) && !locked.includes(c.id))
-    .sort((a, b) => (pinned.includes(a.id) ? 0 : 1) - (pinned.includes(b.id) ? 0 : 1));
-  const archivedChats = CHATS.filter(c => archived.includes(c.id));
-  const lockedChats = CHATS.filter(c => locked.includes(c.id));
+  useEffect(() => {
+    loadConversations();
+    pollRef.current = setInterval(loadConversations, 3000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
-  function archiveChat(id: number) { setArchived(prev => [...prev, id]); }
-  function unarchiveChat(id: number) { setArchived(prev => prev.filter(x => x !== id)); }
-  function togglePin(id: number) { setPinned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
-  function toggleMute(id: number) { setMuted(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); }
+  async function searchUsers(q: string) {
+    if (q.length < 2) { setNewChatResults([]); return; }
+    const res = await fetch(`${MESSAGES_URL}?action=search&q=${encodeURIComponent(q)}`, { headers: { "X-Session-Token": token } });
+    const data = await res.json();
+    if (data.users) setNewChatResults(data.users);
+  }
 
-  function requestLock(chatId: number) {
-    if (!globalPin) {
-      setPinPad({ mode: "confirm", chatId, action: "lock" });
-    } else {
-      setLocked(prev => [...prev, chatId]);
+  async function openOrCreateConv(user: OtherUser) {
+    const res = await fetch(`${MESSAGES_URL}?action=open_conv`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Token": token },
+      body: JSON.stringify({ to_user_id: user.id }),
+    });
+    const data = await res.json();
+    if (data.conv_id) {
+      setNewChat(false);
+      setNewChatQuery("");
+      setNewChatResults([]);
+      setOpenConv({ convId: data.conv_id, otherUser: user });
     }
   }
 
-  function requestUnlock(chatId: number) {
-    setPinPad({ mode: "enter", chatId, action: "unlock" });
-  }
+  const filteredConvs = searchQuery.length >= 2
+    ? conversations.filter(c => {
+        const name = (c.other_user.display_name || c.other_user.username).toLowerCase();
+        return name.includes(searchQuery.toLowerCase());
+      })
+    : conversations;
 
-  function requestOpenLocked(chatId: number) {
-    if (unlockedSession) { setOpenChat(chatId); return; }
-    setPinPad({ mode: "enter", chatId, action: "open" });
-  }
+  if (openConv) return (
+    <ChatView
+      convId={openConv.convId}
+      otherUser={openConv.otherUser}
+      myId={authUser?.id ?? 0}
+      onBack={() => { setOpenConv(null); loadConversations(); }}
+      hideOnlineStatus={hideOnlineStatus}
+      messagePrivacy={messagePrivacy}
+      onGoToPrivacy={onGoToPrivacy}
+    />
+  );
 
-  function requestViewLocked() {
-    if (unlockedSession) { setShowLocked(true); return; }
-    setPinPad({ mode: "enter", action: "view" });
-  }
-
-  function onPinSuccess(pin?: string) {
-    if (!pinPad) return;
-    if (pinPad.mode === "confirm" && pin) {
-      onPinCreated(pin);
-      if (pinPad.chatId) setLocked(prev => [...prev, pinPad.chatId!]);
-    } else if (pinPad.action === "unlock" && pinPad.chatId) {
-      setLocked(prev => prev.filter(x => x !== pinPad.chatId));
-    } else if (pinPad.action === "open" && pinPad.chatId) {
-      setUnlockedSession(true);
-      setOpenChat(pinPad.chatId);
-    } else if (pinPad.action === "view") {
-      setUnlockedSession(true);
-      setShowLocked(true);
-    }
-    setPinPad(null);
-  }
-
-  if (showArchive) {
+  // экран "новый чат"
+  if (newChat) {
     return (
       <div className="flex flex-col h-full">
         <div className="px-4 py-4 space-y-3">
           <div className="flex items-center gap-3">
-            <button onClick={() => setShowArchive(false)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+            <button onClick={() => { setNewChat(false); setNewChatQuery(""); setNewChatResults([]); }} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
               <Icon name="ChevronLeft" size={20} />
             </button>
-            <h1 className="text-xl font-bold gradient-text flex-1">Архив</h1>
+            <h1 className="text-base font-bold gradient-text flex-1">Новый чат</h1>
+          </div>
+          <div className="relative">
+            <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              autoFocus
+              value={newChatQuery}
+              onChange={e => { setNewChatQuery(e.target.value); searchUsers(e.target.value); }}
+              placeholder="Поиск по @username или имени..."
+              className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground"
+            />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2">
-          {archivedChats.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-              <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
-                <Icon name="Archive" size={24} className="text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground">Архив пустой</p>
+          {newChatQuery.length < 2 && (
+            <div className="flex flex-col items-center justify-center h-40 gap-2 text-center px-8">
+              <Icon name="Search" size={28} className="text-muted-foreground/40" />
+              <p className="text-xs text-muted-foreground">Введите минимум 2 символа для поиска</p>
             </div>
-          ) : (
-            archivedChats.map(chat => (
-              <ChatRow
-                key={chat.id}
-                chat={chat}
-                onOpen={() => setOpenChat(chat.id)}
-                onUnarchive={() => unarchiveChat(chat.id)}
-                onMute={() => toggleMute(chat.id)}
-                muted={muted.includes(chat.id)}
-                archived
-              />
-            ))
           )}
-        </div>
-      </div>
-    );
-  }
-
-  if (showLocked) {
-    return (
-      <div className="relative flex flex-col h-full">
-        {pinPad && (
-          <PinPad
-            mode={pinPad.mode}
-            existingPin={globalPin ?? undefined}
-            onSuccess={onPinSuccess}
-            onCancel={() => setPinPad(null)}
-          />
-        )}
-        <div className="px-4 py-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <button onClick={() => { setShowLocked(false); setUnlockedSession(false); }} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
-              <Icon name="ChevronLeft" size={20} />
-            </button>
-            <h1 className="text-xl font-bold gradient-text flex-1">Закрытые чаты</h1>
-            <div className="w-6 h-6 rounded-full bg-neon-purple/20 flex items-center justify-center">
-              <Icon name="Lock" size={12} className="text-neon-purple" />
-            </div>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2">
-          {lockedChats.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-              <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center">
-                <Icon name="Lock" size={24} className="text-muted-foreground" />
+          {newChatResults.map(user => (
+            <button key={user.id} onClick={() => openOrCreateConv(user)}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left animate-fade-in">
+              <UserAvatar user={user} size={10} />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate">{user.display_name || `@${user.username}`}</div>
+                <div className="text-xs text-muted-foreground">@{user.username}</div>
               </div>
-              <p className="text-sm text-muted-foreground">Нет закрытых чатов</p>
+            </button>
+          ))}
+          {newChatQuery.length >= 2 && newChatResults.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-40 gap-2 text-center px-8">
+              <p className="text-sm text-muted-foreground">Пользователи не найдены</p>
             </div>
-          ) : (
-            lockedChats.map(chat => (
-              <ChatRow
-                key={chat.id}
-                chat={chat}
-                onOpen={() => setOpenChat(chat.id)}
-                onMute={() => toggleMute(chat.id)}
-                onLock={() => requestUnlock(chat.id)}
-                muted={muted.includes(chat.id)}
-                locked
-              />
-            ))
           )}
         </div>
       </div>
@@ -758,15 +715,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   }
 
   return (
-    <div className="relative flex flex-col h-full">
-      {pinPad && (
-        <PinPad
-          mode={pinPad.mode}
-          existingPin={globalPin ?? undefined}
-          onSuccess={onPinSuccess}
-          onCancel={() => setPinPad(null)}
-        />
-      )}
+    <div className="flex flex-col h-full">
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
@@ -782,86 +731,65 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
               {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
             </div>
           </div>
-          <div className="flex gap-1">
-            <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
-              <Icon name="Search" size={18} />
-            </button>
-            <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
-              <Icon name="SquarePen" size={18} />
-            </button>
-          </div>
+          <button onClick={() => setNewChat(true)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+            <Icon name="SquarePen" size={18} />
+          </button>
         </div>
         <div className="relative">
           <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input placeholder="Поиск чатов..." className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground" />
+          <input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Поиск чатов..."
+            className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground"
+          />
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2">
-        {lockedChats.length > 0 && (
-          <button
-            onClick={requestViewLocked}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left mb-1 animate-fade-in"
-          >
-            <div className="w-10 h-10 rounded-full bg-neon-purple/10 border border-neon-purple/20 flex items-center justify-center flex-shrink-0">
-              <Icon name="Lock" size={18} className="text-neon-purple" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <span className="font-semibold text-sm">Закрытые чаты</span>
-              <div className="text-xs text-muted-foreground">{lockedChats.length} {lockedChats.length === 1 ? "чат" : "чата"} · защищено пин-кодом</div>
-            </div>
-            <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
-          </button>
+        {loading && (
+          <div className="flex items-center justify-center h-40">
+            <Icon name="Loader2" size={24} className="text-neon-purple animate-spin" />
+          </div>
         )}
-        {archivedChats.length > 0 && (
-          <button
-            onClick={() => setShowArchive(true)}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left mb-1 animate-fade-in"
-          >
-            <div className="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center flex-shrink-0">
-              <Icon name="Archive" size={18} className="text-muted-foreground" />
+        {!loading && filteredConvs.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8 pb-16">
+            <div className="w-16 h-16 rounded-3xl gradient-purple-blue flex items-center justify-center glow-purple">
+              <Icon name="MessageCircle" size={28} className="text-white" />
             </div>
-            <div className="flex-1 min-w-0">
-              <span className="font-semibold text-sm">Архив</span>
-              <div className="text-xs text-muted-foreground">{archivedChats.length} {archivedChats.length === 1 ? "чат" : "чата"}</div>
-            </div>
-            <Icon name="ChevronRight" size={16} className="text-muted-foreground flex-shrink-0" />
-          </button>
+            <p className="font-semibold">Нет чатов</p>
+            <p className="text-xs text-muted-foreground">Нажмите карандаш сверху, чтобы найти пользователя и начать общение</p>
+          </div>
         )}
-        {activeChats.filter(c => pinned.includes(c.id)).length > 0 && (
-          <>
-            <div className="flex items-center gap-2 px-3 pt-1 pb-0.5">
-              <Icon name="Pin" size={11} className="text-muted-foreground/60" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Закреплённые</span>
-            </div>
-            {activeChats.filter(c => pinned.includes(c.id)).map(chat => (
-              <ChatRow
-                key={chat.id}
-                chat={chat}
-                onOpen={() => setOpenChat(chat.id)}
-                onArchive={() => archiveChat(chat.id)}
-                onPin={() => togglePin(chat.id)}
-                onMute={() => toggleMute(chat.id)}
-                onLock={() => requestLock(chat.id)}
-                pinned
-                muted={muted.includes(chat.id)}
-              />
-            ))}
-            <div className="mx-3 my-1 border-t border-border/30" />
-          </>
-        )}
-        {activeChats.filter(c => !pinned.includes(c.id)).map(chat => (
-          <ChatRow
-            key={chat.id}
-            chat={chat}
-            onOpen={() => setOpenChat(chat.id)}
-            onArchive={() => archiveChat(chat.id)}
-            onPin={() => togglePin(chat.id)}
-            onMute={() => toggleMute(chat.id)}
-            onLock={() => requestLock(chat.id)}
-            pinned={false}
-            muted={muted.includes(chat.id)}
-          />
-        ))}
+        {filteredConvs.map(conv => {
+          const name = conv.other_user.display_name || `@${conv.other_user.username}`;
+          return (
+            <button
+              key={conv.id}
+              onClick={() => setOpenConv({ convId: conv.id, otherUser: conv.other_user })}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all text-left animate-fade-in"
+            >
+              <div className="relative">
+                <UserAvatar user={conv.other_user} size={11} />
+                {conv.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full gradient-purple-blue text-white text-[10px] font-bold flex items-center justify-center px-1">
+                    {conv.unread > 99 ? "99+" : conv.unread}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm truncate">{name}</span>
+                  {conv.last_message && <span className="text-[10px] text-muted-foreground flex-shrink-0">{fmtConvTime(conv.last_message.at)}</span>}
+                </div>
+                <div className="text-xs text-muted-foreground truncate mt-0.5">
+                  {conv.last_message
+                    ? (conv.last_message.mine ? `Вы: ${conv.last_message.text}` : conv.last_message.text)
+                    : <span className="italic">Нет сообщений</span>}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
