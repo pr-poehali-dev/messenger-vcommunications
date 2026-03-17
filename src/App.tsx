@@ -7,6 +7,7 @@ const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c
 const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb-09980e8a9c27";
 const UPDATE_PROFILE_URL = "https://functions.poehali.dev/906e9817-4957-4d99-9bc2-082e8b2d03df";
 const MESSAGES_URL = "https://functions.poehali.dev/2bd34809-22df-4f72-8b11-90ec52d3b5d0";
+const SIGNALING_URL = "https://functions.poehali.dev/6f79e618-cca7-4867-bfa0-4d6bf1af1cf1";
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, ms = 8000): Promise<Response> {
   const ctrl = new AbortController();
@@ -237,9 +238,10 @@ function fmtLastSeen(last_seen: string) {
   return `${d.toLocaleDateString("ru", { day: "numeric", month: "short" })}`;
 }
 
-function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy }: {
+function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePrivacy, onGoToPrivacy, onCall }: {
   convId: number; otherUser: OtherUser; myId: number; onBack: () => void;
   hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void;
+  onCall?: (user: OtherUser) => void;
 }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<RealMessage[]>([]);
@@ -377,10 +379,7 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
-            <Icon name="Phone" size={18} />
-          </button>
-          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
+          <button onClick={() => onCall?.(otherUser)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
             <Icon name="Video" size={18} />
           </button>
         </div>
@@ -697,7 +696,7 @@ function fmtConvTime(at: string) {
   return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
 }
 
-function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null }) {
+function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser, onCall }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null; onCall?: (user: OtherUser) => void }) {
   const [openConv, setOpenConv] = useState<{ convId: number; otherUser: OtherUser } | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -793,6 +792,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
       hideOnlineStatus={hideOnlineStatus}
       messagePrivacy={messagePrivacy}
       onGoToPrivacy={onGoToPrivacy}
+      onCall={onCall}
     />
   );
 
@@ -1514,12 +1514,22 @@ const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: "profile", icon: "User", label: "Профиль" },
 ];
 
-type IncomingCall = {
-  contact: typeof CONTACTS[0];
-  type: "audio" | "video";
-};
+interface CallInfo {
+  call_id: number;
+  caller: { id: number; username: string; display_name?: string | null; avatar_url?: string | null };
+  offer?: RTCSessionDescriptionInit;
+}
+interface ActiveCallInfo {
+  call_id: number;
+  otherUser: { id: number; username: string; display_name?: string | null; avatar_url?: string | null };
+  iscaller: boolean;
+  peerConnection: RTCPeerConnection;
+  localStream: MediaStream;
+  remoteStream: MediaStream;
+}
 
-function IncomingCallScreen({ call, onAccept, onDecline }: { call: IncomingCall; onAccept: () => void; onDecline: () => void }) {
+function IncomingCallScreen({ call, onAccept, onDecline }: { call: CallInfo; onAccept: () => void; onDecline: () => void }) {
+  const name = call.caller.display_name || `@${call.caller.username}`;
   return (
     <div className="absolute inset-0 z-50 flex flex-col items-center justify-between py-16 px-8 animate-fade-in" style={{ background: "linear-gradient(160deg, hsl(258 85% 10%) 0%, hsl(222 25% 5%) 50%, hsl(210 100% 8%) 100%)" }}>
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1527,42 +1537,27 @@ function IncomingCallScreen({ call, onAccept, onDecline }: { call: IncomingCall;
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.12) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite 0.6s" }} />
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.1) 0%, transparent 70%)", animation: "pulse-ring 2.5s ease-out infinite 1.2s" }} />
       </div>
-
       <div className="text-center z-10 mt-4">
-        <p className="text-sm text-muted-foreground mb-1 tracking-widest uppercase font-medium">
-          {call.type === "video" ? "Входящий видеозвонок" : "Входящий звонок"}
-        </p>
-        <h2 className="text-3xl font-bold text-white mb-1">{call.contact.name}</h2>
+        <p className="text-sm text-muted-foreground mb-1 tracking-widest uppercase font-medium">Входящий видеозвонок</p>
+        <h2 className="text-3xl font-bold text-white mb-1">{name}</h2>
         <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-          <Icon name={call.type === "video" ? "Video" : "Phone"} size={14} />
+          <Icon name="Video" size={14} />
           <span className="animate-pulse">Звонит...</span>
         </div>
       </div>
-
       <div className="relative z-10">
-        <div className={`w-28 h-28 rounded-full bg-gradient-to-br ${call.contact.color} flex items-center justify-center text-white text-4xl font-bold shadow-2xl animate-pulse-glow`}>
-          {call.contact.avatar}
-        </div>
+        <UserAvatar user={call.caller} size={28} />
       </div>
-
       <div className="flex items-center gap-14 z-10">
         <div className="flex flex-col items-center gap-2">
-          <button
-            onClick={onDecline}
-            className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-red-500/40"
-          >
+          <button onClick={onDecline} className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-red-500/40">
             <Icon name="PhoneOff" size={26} className="text-white" />
           </button>
           <span className="text-xs text-muted-foreground">Отклонить</span>
         </div>
-
         <div className="flex flex-col items-center gap-2">
-          <button
-            onClick={onAccept}
-            className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-emerald-500/40 animate-pulse-glow"
-            style={{ boxShadow: "0 0 20px hsl(142 71% 45% / 0.6), 0 0 40px hsl(142 71% 45% / 0.3)" }}
-          >
-            <Icon name={call.type === "video" ? "Video" : "Phone"} size={26} className="text-white" />
+          <button onClick={onAccept} className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-emerald-500/40 animate-pulse-glow" style={{ boxShadow: "0 0 20px hsl(142 71% 45% / 0.6), 0 0 40px hsl(142 71% 45% / 0.3)" }}>
+            <Icon name="Video" size={26} className="text-white" />
           </button>
           <span className="text-xs text-muted-foreground">Принять</span>
         </div>
@@ -1571,75 +1566,80 @@ function IncomingCallScreen({ call, onAccept, onDecline }: { call: IncomingCall;
   );
 }
 
-function ActiveCallScreen({ call, onEnd }: { call: IncomingCall; onEnd: () => void }) {
+function ActiveCallScreen({ call, onEnd }: { call: ActiveCallInfo; onEnd: () => void }) {
   const [muted, setMuted] = useState(false);
-  const [speakerOn, setSpeakerOn] = useState(true);
   const [camOff, setCamOff] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  useState(() => {
+  useEffect(() => {
     const timer = setInterval(() => setElapsed(e => e + 1), 1000);
     return () => clearInterval(timer);
-  });
+  }, []);
+
+  useEffect(() => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = call.localStream;
+    }
+  }, [call.localStream]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = call.remoteStream;
+    }
+  }, [call.remoteStream]);
+
+  function toggleMic() {
+    call.localStream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+    setMuted(m => !m);
+  }
+
+  function toggleCam() {
+    call.localStream.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
+    setCamOff(c => !c);
+  }
 
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  const name = call.otherUser.display_name || `@${call.otherUser.username}`;
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col animate-fade-in" style={{ background: "linear-gradient(160deg, hsl(185 100% 8%) 0%, hsl(222 25% 5%) 50%, hsl(258 85% 8%) 100%)" }}>
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full" style={{ background: "radial-gradient(circle, hsl(185 100% 55% / 0.08) 0%, transparent 70%)" }} />
-        <div className="absolute -bottom-20 -left-20 w-64 h-64 rounded-full" style={{ background: "radial-gradient(circle, hsl(258 85% 65% / 0.08) 0%, transparent 70%)" }} />
+    <div className="absolute inset-0 z-50 flex flex-col animate-fade-in bg-black">
+      <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+      <div className="absolute inset-0 bg-black/30" />
+
+      <div className="absolute top-4 right-4 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl z-10">
+        <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
+        {camOff && (
+          <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
+            <Icon name="VideoOff" size={24} className="text-white/50" />
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center justify-between px-5 pt-5 z-10">
-        <button className="p-2 rounded-xl hover:bg-white/10 transition-colors text-white/60 hover:text-white">
-          <Icon name="ChevronDown" size={22} />
-        </button>
+      <div className="relative z-10 flex items-center justify-between px-5 pt-10">
+        <div />
         <div className="text-center">
-          <p className="text-white/60 text-xs uppercase tracking-widest">{call.type === "video" ? "Видеозвонок" : "Аудиозвонок"}</p>
-          <p className="text-emerald-400 font-semibold text-sm font-mono">{fmt(elapsed)}</p>
+          <p className="text-white font-semibold">{name}</p>
+          <p className="text-emerald-400 font-mono text-sm">{fmt(elapsed)}</p>
         </div>
-        <button className="p-2 rounded-xl hover:bg-white/10 transition-colors text-white/60 hover:text-white">
-          <Icon name="MoreHorizontal" size={22} />
-        </button>
+        <div />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center z-10 gap-4">
-        <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${call.contact.color} flex items-center justify-center text-white text-4xl font-bold shadow-2xl`}>
-          {call.contact.avatar}
-        </div>
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-white">{call.contact.name}</h2>
-          <p className="text-white/50 text-sm mt-1">
-            {call.contact.online ? "В сети" : call.contact.status}
-          </p>
-        </div>
-      </div>
-
-      <div className="px-8 pb-12 z-10">
-        <div className="flex items-center justify-center gap-4 mb-8">
-          <button onClick={() => setMuted(m => !m)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${muted ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
+      <div className="absolute bottom-0 left-0 right-0 z-10 px-8 pb-12">
+        <div className="flex items-center justify-center gap-4 mb-6">
+          <button onClick={toggleMic} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${muted ? "bg-white/30 text-white" : "bg-white/10 text-white/70 hover:bg-white/20"}`}>
             <Icon name={muted ? "MicOff" : "Mic"} size={20} />
-            <span className="text-[9px]">{muted ? "Вкл. микр." : "Микрофон"}</span>
+            <span className="text-[9px]">{muted ? "Вкл." : "Микр."}</span>
           </button>
-          {call.type === "video" && (
-            <button onClick={() => setCamOff(c => !c)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${camOff ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
-              <Icon name={camOff ? "VideoOff" : "Video"} size={20} />
-              <span className="text-[9px]">{camOff ? "Вкл. камеру" : "Камера"}</span>
-            </button>
-          )}
-          <button onClick={() => setSpeakerOn(s => !s)} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${speakerOn ? "bg-white/20 text-white" : "bg-white/10 text-white/60 hover:bg-white/15"}`}>
-            <Icon name={speakerOn ? "Volume2" : "VolumeX"} size={20} />
-            <span className="text-[9px]">{speakerOn ? "Динамик" : "Без звука"}</span>
+          <button onClick={toggleCam} className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all ${camOff ? "bg-white/30 text-white" : "bg-white/10 text-white/70 hover:bg-white/20"}`}>
+            <Icon name={camOff ? "VideoOff" : "Video"} size={20} />
+            <span className="text-[9px]">{camOff ? "Вкл." : "Камера"}</span>
           </button>
         </div>
-
-        <button
-          onClick={onEnd}
-          className="w-full py-4 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/30"
-        >
+        <button onClick={onEnd} className="w-full py-4 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/30">
           <Icon name="PhoneOff" size={22} className="text-white" />
-          <span className="text-white font-semibold">Завершить звонок</span>
+          <span className="text-white font-semibold">Завершить</span>
         </button>
       </div>
     </div>
@@ -1678,6 +1678,17 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<Tab>("chats");
 
+  const [incomingCall, setIncomingCall] = useState<CallInfo | null>(null);
+  const [activeCall, setActiveCall] = useState<ActiveCallInfo | null>(null);
+  const activeCallRef = useRef<ActiveCallInfo | null>(null);
+  const incomingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [globalPin, setGlobalPin] = useState<string | null>(null);
+  const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
+  const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
+  const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
+  const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
+  const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
+
   // ping — обновляем last_seen каждые 30 сек
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
@@ -1688,24 +1699,198 @@ export default function App() {
     return () => clearInterval(id);
   }, [authUser]);
 
-  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>({
-    contact: CONTACTS[0],
-    type: "video",
-  });
-  const [activeCall, setActiveCall] = useState<IncomingCall | null>(null);
-  const [globalPin, setGlobalPin] = useState<string | null>(null);
-  const [pinPadApp, setPinPadApp] = useState<null | { mode: "enter" | "confirm"; resolve: (pin: string) => void; onSuccess?: () => void }>(null);
-  const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
-  const [messagePrivacy, setMessagePrivacy] = useState<PrivacyLevel>("all");
-  const [avatarPrivacy, setAvatarPrivacy] = useState<PrivacyLevel>("all");
-  const [callPrivacy, setCallPrivacy] = useState<PrivacyLevel>("all");
+  // Poll for incoming calls
+  useEffect(() => {
+    if (!authUser) return;
+    const token = localStorage.getItem("auth_token") || "";
+    incomingPollRef.current = setInterval(async () => {
+      if (activeCallRef.current) return;
+      try {
+        const r = await fetchWithTimeout(SIGNALING_URL + "?action=incoming", { headers: { "X-Session-Token": token } });
+        const d = await r.json();
+        if (d.call && !activeCallRef.current) {
+          setIncomingCall(d.call);
+        } else if (!d.call) {
+          setIncomingCall(prev => {
+            if (prev && !activeCallRef.current) return null;
+            return prev;
+          });
+        }
+      } catch (_e) { /* ignore poll error */ }
+    }, 3000);
+    return () => { if (incomingPollRef.current) clearInterval(incomingPollRef.current); };
+  }, [authUser]);
 
-  const handleAccept = () => {
-    setActiveCall(incomingCall);
+  const STUN_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+
+  async function startCall(target: OtherUser) {
+    const token = localStorage.getItem("auth_token") || "";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const pc = new RTCPeerConnection(STUN_SERVERS);
+      const remoteStream = new MediaStream();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const res = await fetchWithTimeout(SIGNALING_URL + "?action=call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ callee_id: target.id, offer }),
+      });
+      const data = await res.json();
+      if (!data.call_id) { stream.getTracks().forEach(t => t.stop()); return; }
+
+      const callInfo: ActiveCallInfo = { call_id: data.call_id, otherUser: target, iscaller: true, peerConnection: pc, localStream: stream, remoteStream };
+      activeCallRef.current = callInfo;
+      setActiveCall(callInfo);
+
+      // Poll for answer and ICE
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${data.call_id}`, { headers: { "X-Session-Token": token } });
+          const d = await r.json();
+          if (d.status === 'ended' || d.status === 'rejected') {
+            clearInterval(poll);
+            stopCall(callInfo);
+            return;
+          }
+          if (d.answer && !pc.remoteDescription) {
+            await pc.setRemoteDescription(new RTCSessionDescription(d.answer));
+          }
+          if (d.ice && Array.isArray(d.ice)) {
+            for (const c of d.ice) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_e) { /* ignore bad candidate */ }
+            }
+          }
+        } catch (_e) { /* ignore poll error */ }
+      }, 2000);
+
+      pc.onicecandidate = async e => {
+        if (e.candidate) {
+          try {
+            await fetchWithTimeout(SIGNALING_URL + "?action=ice", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Session-Token": token },
+              body: JSON.stringify({ call_id: data.call_id, candidate: e.candidate.toJSON() }),
+            });
+          } catch (_e) { /* ignore ice send error */ }
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          clearInterval(poll);
+          stopCall(callInfo);
+        }
+      };
+    } catch (_e) { /* ignore startCall error */ }
+  }
+
+  async function handleAccept() {
+    if (!incomingCall) return;
+    const token = localStorage.getItem("auth_token") || "";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const pc = new RTCPeerConnection(STUN_SERVERS);
+      const remoteStream = new MediaStream();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer!));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await fetchWithTimeout(SIGNALING_URL + "?action=answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ call_id: incomingCall.call_id, answer }),
+      });
+
+      const callInfo: ActiveCallInfo = { call_id: incomingCall.call_id, otherUser: incomingCall.caller, iscaller: false, peerConnection: pc, localStream: stream, remoteStream };
+      activeCallRef.current = callInfo;
+      setIncomingCall(null);
+      setActiveCall(callInfo);
+
+      // Poll for ICE and status
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetchWithTimeout(SIGNALING_URL + `?action=status&call_id=${incomingCall.call_id}`, { headers: { "X-Session-Token": token } });
+          const d = await r.json();
+          if (d.status === 'ended') { clearInterval(poll); stopCall(callInfo); return; }
+          if (d.ice && Array.isArray(d.ice)) {
+            for (const c of d.ice) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_e) { /* ignore bad candidate */ }
+            }
+          }
+        } catch (_e) { /* ignore poll error */ }
+      }, 2000);
+
+      pc.onicecandidate = async e => {
+        if (e.candidate) {
+          try {
+            await fetchWithTimeout(SIGNALING_URL + "?action=ice", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Session-Token": token },
+              body: JSON.stringify({ call_id: incomingCall.call_id, candidate: e.candidate.toJSON() }),
+            });
+          } catch (_e) { /* ignore ice send error */ }
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          clearInterval(poll);
+          stopCall(callInfo);
+        }
+      };
+    } catch (_) {
+      await fetchWithTimeout(SIGNALING_URL + "?action=reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ call_id: incomingCall.call_id }),
+      }).catch(() => {});
+      setIncomingCall(null);
+    }
+  }
+
+  async function handleDecline() {
+    if (!incomingCall) return;
+    const token = localStorage.getItem("auth_token") || "";
+    try {
+      await fetchWithTimeout(SIGNALING_URL + "?action=reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ call_id: incomingCall.call_id }),
+      });
+    } catch (_e) { /* ignore decline error */ }
     setIncomingCall(null);
-  };
-  const handleDecline = () => setIncomingCall(null);
-  const handleEndCall = () => setActiveCall(null);
+  }
+
+  function stopCall(callInfo: ActiveCallInfo) {
+    callInfo.localStream.getTracks().forEach(t => t.stop());
+    callInfo.peerConnection.close();
+    if (activeCallRef.current?.call_id === callInfo.call_id) {
+      activeCallRef.current = null;
+      setActiveCall(null);
+    }
+  }
+
+  async function handleEndCall() {
+    const call = activeCallRef.current || activeCall;
+    if (!call) return;
+    const token = localStorage.getItem("auth_token") || "";
+    try {
+      await fetchWithTimeout(SIGNALING_URL + "?action=end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-Token": token },
+        body: JSON.stringify({ call_id: call.call_id }),
+      });
+    } catch (_e) { /* ignore end call error */ }
+    stopCall(call);
+  }
 
   function requestSetPin() {
     if (globalPin) {
@@ -1739,7 +1924,7 @@ export default function App() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} authUser={authUser} />;
+      case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} authUser={authUser} onCall={startCall} />;
       case "contacts": return <ContactsTab authUser={authUser} />;
       case "calls": return <CallsTab authUser={authUser} />;
       case "status": return <StatusTab />;
