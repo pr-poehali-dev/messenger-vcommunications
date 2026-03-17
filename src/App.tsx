@@ -199,6 +199,8 @@ function showPushNotification(title: string, body: string, icon?: string | null)
   }
 }
 
+let activeCallNotification: Notification | null = null;
+
 async function requestNotificationPermission() {
   if (!("Notification" in window)) return;
   if (Notification.permission === "default") {
@@ -1784,6 +1786,20 @@ export default function App() {
           setIncomingCall(prev => {
             if (!prev && d.call) {
               startRingtone('incoming');
+              if (Notification.permission === 'granted') {
+                const callerName = d.call.caller.display_name || `@${d.call.caller.username}`;
+                if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
+                try {
+                  activeCallNotification = new Notification('📞 Входящий звонок', {
+                    body: callerName,
+                    icon: d.call.caller.avatar_url || undefined,
+                    tag: 'incoming-call',
+                    requireInteraction: true,
+                    silent: true,
+                  });
+                  activeCallNotification.onclick = () => { window.focus(); if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; } };
+                } catch (_e) { /* Notification not supported */ }
+              }
             }
             return d.call;
           });
@@ -1873,6 +1889,7 @@ export default function App() {
   async function handleAccept() {
     if (!incomingCall) return;
     stopRingtone();
+    if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
     const token = localStorage.getItem("auth_token") || "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -1941,6 +1958,7 @@ export default function App() {
   async function handleDecline() {
     if (!incomingCall) return;
     stopRingtone();
+    if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
     const token = localStorage.getItem("auth_token") || "";
     try {
       await fetchWithTimeout(SIGNALING_URL + "?action=reject", {
@@ -1954,6 +1972,7 @@ export default function App() {
 
   function stopCall(callInfo: ActiveCallInfo) {
     stopRingtone();
+    if (activeCallNotification) { activeCallNotification.close(); activeCallNotification = null; }
     callInfo.localStream.getTracks().forEach(t => t.stop());
     callInfo.peerConnection.close();
     if (activeCallRef.current?.call_id === callInfo.call_id) {
