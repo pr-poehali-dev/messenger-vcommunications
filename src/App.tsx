@@ -751,6 +751,29 @@ function fmtConvTime(at: string) {
   return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
 }
 
+interface ChatFolder {
+  id: string;
+  name: string;
+  icon: string;
+  convIds: number[];
+}
+
+const SYSTEM_FOLDERS = [
+  { id: "all", name: "Все", icon: "MessageCircle" },
+  { id: "unread", name: "Непрочит.", icon: "BellDot" },
+];
+
+function loadFolders(userId: number): ChatFolder[] {
+  try {
+    const raw = localStorage.getItem(`chat_folders_${userId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveFolders(userId: number, folders: ChatFolder[]) {
+  localStorage.setItem(`chat_folders_${userId}`, JSON.stringify(folders));
+}
+
 function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, onGoToPrivacy, authUser, onCall }: { sharedPin: string | null; onPinCreated: (pin: string) => void; hideOnlineStatus?: boolean; messagePrivacy?: PrivacyLevel; onGoToPrivacy?: () => void; authUser?: AuthUser | null; onCall?: (user: OtherUser, type: 'video' | 'audio') => void }) {
   const [openConv, setOpenConv] = useState<{ convId: number; otherUser: OtherUser } | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -763,9 +786,40 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   const [newChatResults, setNewChatResults] = useState<OtherUser[]>([]);
   const [offline, setOffline] = useState(false);
   const [reconnected, setReconnected] = useState(false);
+  const [activeFolder, setActiveFolder] = useState("all");
+  const [folders, setFolders] = useState<ChatFolder[]>(() => loadFolders(authUser?.id ?? 0));
+  const [manageFolders, setManageFolders] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [addToFolder, setAddToFolder] = useState<{ folderId: string; convId: number } | null>(null);
   const wasOfflineRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = localStorage.getItem("auth_token") || "";
+
+  function updateFolders(next: ChatFolder[]) {
+    setFolders(next);
+    saveFolders(authUser?.id ?? 0, next);
+  }
+
+  function createFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    const folder: ChatFolder = { id: `f_${Date.now()}`, name, icon: "Folder", convIds: [] };
+    updateFolders([...folders, folder]);
+    setNewFolderName("");
+  }
+
+  function deleteFolder(id: string) {
+    updateFolders(folders.filter(f => f.id !== id));
+    if (activeFolder === id) setActiveFolder("all");
+  }
+
+  function toggleConvInFolder(folderId: string, convId: number) {
+    updateFolders(folders.map(f =>
+      f.id === folderId
+        ? { ...f, convIds: f.convIds.includes(convId) ? f.convIds.filter(id => id !== convId) : [...f.convIds, convId] }
+        : f
+    ));
+  }
 
   const prevUnreadRef = useRef<Record<number, number>>({});
 
@@ -831,12 +885,90 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
     } catch (_) { /* ignore */ }
   }
 
+  const folderFiltered = (() => {
+    if (activeFolder === "all") return conversations;
+    if (activeFolder === "unread") return conversations.filter(c => c.unread > 0);
+    const folder = folders.find(f => f.id === activeFolder);
+    return folder ? conversations.filter(c => folder.convIds.includes(c.id)) : conversations;
+  })();
+
   const filteredConvs = searchQuery.length >= 2
-    ? conversations.filter(c => {
+    ? folderFiltered.filter(c => {
         const name = (c.other_user.display_name || c.other_user.username).toLowerCase();
         return name.includes(searchQuery.toLowerCase());
       })
-    : conversations;
+    : folderFiltered;
+
+  if (manageFolders) return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-4 flex items-center gap-3 border-b border-border/50">
+        <button onClick={() => setManageFolders(false)} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+          <Icon name="ChevronLeft" size={20} />
+        </button>
+        <h1 className="text-base font-bold gradient-text flex-1">Папки чатов</h1>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider px-1">Создать папку</p>
+          <div className="flex gap-2">
+            <input
+              value={newFolderName}
+              onChange={e => setNewFolderName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") createFolder(); }}
+              placeholder="Название папки..."
+              maxLength={20}
+              className="flex-1 bg-muted/50 border border-border/50 rounded-xl px-3 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground"
+            />
+            <button
+              onClick={createFolder}
+              disabled={!newFolderName.trim()}
+              className="px-4 py-2 rounded-xl gradient-purple-blue text-white text-sm font-medium disabled:opacity-40 transition-opacity"
+            >
+              Создать
+            </button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider px-1">Мои папки</p>
+          {folders.length === 0 && (
+            <p className="text-sm text-muted-foreground px-1 py-4 text-center">Нет папок. Создайте первую!</p>
+          )}
+          {folders.map(folder => (
+            <div key={folder.id} className="glass-strong rounded-2xl overflow-hidden">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <Icon name={folder.icon as "Folder"} size={18} className="text-neon-purple flex-shrink-0" />
+                <span className="flex-1 font-medium text-sm">{folder.name}</span>
+                <span className="text-xs text-muted-foreground">{folder.convIds.length} чатов</span>
+                <button onClick={() => deleteFolder(folder.id)} className="p-1.5 rounded-lg hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors ml-1">
+                  <Icon name="Trash2" size={15} />
+                </button>
+              </div>
+              <div className="border-t border-border/30 px-4 py-2 space-y-1 max-h-48 overflow-y-auto">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Добавить/убрать чаты</p>
+                {conversations.length === 0 && <p className="text-xs text-muted-foreground py-2">Нет чатов</p>}
+                {conversations.map(conv => {
+                  const inFolder = folder.convIds.includes(conv.id);
+                  return (
+                    <button
+                      key={conv.id}
+                      onClick={() => toggleConvInFolder(folder.id, conv.id)}
+                      className="w-full flex items-center gap-3 py-2 px-1 rounded-xl hover:bg-muted/40 transition-all text-left"
+                    >
+                      <div className={`w-4 h-4 rounded flex items-center justify-center border-2 flex-shrink-0 transition-all ${inFolder ? "gradient-purple-blue border-transparent" : "border-muted-foreground/40"}`}>
+                        {inFolder && <Icon name="Check" size={10} className="text-white" />}
+                      </div>
+                      <UserAvatar user={conv.other_user} size={7} />
+                      <span className="text-sm truncate">{conv.other_user.display_name || `@${conv.other_user.username}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
   if (openConv) return (
     <ChatView
@@ -934,9 +1066,14 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
               {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
             </div>
           </div>
-          <button onClick={() => setNewChat(true)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple">
-            <Icon name="SquarePen" size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setManageFolders(true)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple" title="Папки">
+              <Icon name="FolderOpen" size={18} />
+            </button>
+            <button onClick={() => setNewChat(true)} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-purple" title="Новый чат">
+              <Icon name="SquarePen" size={18} />
+            </button>
+          </div>
         </div>
         <div className="relative">
           <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -947,6 +1084,30 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
             className="w-full bg-muted/50 border border-border/50 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-neon-purple/50 transition-colors placeholder:text-muted-foreground"
           />
         </div>
+      </div>
+      <div className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-hide">
+        {[...SYSTEM_FOLDERS, ...folders].map(f => {
+          const isActive = activeFolder === f.id;
+          const count = f.id === "unread"
+            ? conversations.filter(c => c.unread > 0).length
+            : f.id === "all" ? 0
+            : folders.find(x => x.id === f.id)?.convIds.length ?? 0;
+          return (
+            <button
+              key={f.id}
+              onClick={() => setActiveFolder(f.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap flex-shrink-0 transition-all ${isActive ? "gradient-purple-blue text-white shadow-md" : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+            >
+              <Icon name={f.icon as "Folder"} size={13} />
+              {f.name}
+              {count > 0 && (
+                <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${isActive ? "bg-white/20" : "bg-neon-purple/20 text-neon-purple"}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div className="flex-1 overflow-y-auto px-2">
         {loading && (
