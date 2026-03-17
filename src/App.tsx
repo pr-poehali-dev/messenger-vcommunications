@@ -236,6 +236,7 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   const [lastId, setLastId] = useState(0);
   const [sending, setSending] = useState(false);
   const [onlineStatus, setOnlineStatus] = useState<{ online: boolean; last_seen: string | null } | null>(null);
+  const [offline, setOffline] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onlineRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -266,7 +267,8 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
           if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
         }
       }
-    } catch (_) { /* network error, retry on next poll */ }
+    } catch (_) { setOffline(true); return; }
+    setOffline(false);
   }
 
   async function loadOnlineStatus() {
@@ -318,6 +320,12 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
 
   return (
     <div className="flex flex-col h-full animate-slide-in-right">
+      {offline && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/20 text-yellow-400 text-xs">
+          <Icon name="WifiOff" size={13} />
+          Нет соединения — пытаемся восстановить...
+        </div>
+      )}
       <div className="glass-strong px-4 py-3 flex items-center gap-3 border-b border-border/50">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
           <Icon name="ChevronLeft" size={20} />
@@ -671,6 +679,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
   const [newChat, setNewChat] = useState(false);
   const [newChatQuery, setNewChatQuery] = useState("");
   const [newChatResults, setNewChatResults] = useState<OtherUser[]>([]);
+  const [offline, setOffline] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = localStorage.getItem("auth_token") || "";
 
@@ -680,6 +689,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
     try {
       const res = await fetch(`${MESSAGES_URL}?action=conversations`, { headers: { "X-Session-Token": token } });
       const data = await res.json();
+      setOffline(false);
       if (data.conversations) {
         if (notify) {
           for (const conv of data.conversations as Conversation[]) {
@@ -694,7 +704,7 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
         prevUnreadRef.current = Object.fromEntries((data.conversations as Conversation[]).map(c => [c.id, c.unread]));
         setConversations(data.conversations);
       }
-    } catch (_) { /* network error, retry on next poll */ }
+    } catch (_) { setOffline(true); }
     setLoading(false);
   }
 
@@ -801,6 +811,12 @@ function ChatsTab({ sharedPin, onPinCreated, hideOnlineStatus, messagePrivacy, o
 
   return (
     <div className="flex flex-col h-full">
+      {offline && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/15 border-b border-yellow-500/20 text-yellow-400 text-xs">
+          <Icon name="WifiOff" size={13} />
+          Нет соединения — пытаемся восстановить...
+        </div>
+      )}
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
