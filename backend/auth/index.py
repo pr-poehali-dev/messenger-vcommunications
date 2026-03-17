@@ -98,7 +98,7 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
-            f'SELECT id, phone, username, avatar_url FROM "{schema}".users WHERE (phone = %s OR username = %s) AND password_hash = %s',
+            f'SELECT id, phone, username, avatar_url, display_name, status FROM "{schema}".users WHERE (phone = %s OR username = %s) AND password_hash = %s',
             (login, login, hash_password(password))
         )
         user = cur.fetchone()
@@ -106,7 +106,7 @@ def handler(event: dict, context) -> dict:
             cur.close(); conn.close()
             return json_response(401, {'error': 'Неверный логин или пароль'})
 
-        user_id, phone, username, avatar_url = user
+        user_id, phone, username, avatar_url, display_name, status = user
         token = make_token()
         expires = datetime.utcnow() + timedelta(days=30)
         cur.execute(
@@ -118,7 +118,7 @@ def handler(event: dict, context) -> dict:
 
         return json_response(200, {
             'token': token,
-            'user': {'id': user_id, 'phone': phone, 'username': username, 'avatar_url': avatar_url}
+            'user': {'id': user_id, 'phone': phone, 'username': username, 'avatar_url': avatar_url, 'display_name': display_name, 'status': status}
         })
 
     # GET /me
@@ -130,7 +130,7 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
-            f'''SELECT u.id, u.phone, u.username, u.avatar_url FROM "{schema}".users u
+            f'''SELECT u.id, u.phone, u.username, u.avatar_url, u.display_name, u.status FROM "{schema}".users u
                JOIN "{schema}".sessions s ON s.user_id = u.id
                WHERE s.token = %s AND s.expires_at > NOW()''',
             (token,)
@@ -141,7 +141,7 @@ def handler(event: dict, context) -> dict:
         if not user:
             return json_response(401, {'error': 'Сессия истекла'})
 
-        return json_response(200, {'user': {'id': user[0], 'phone': user[1], 'username': user[2], 'avatar_url': user[3]}})
+        return json_response(200, {'user': {'id': user[0], 'phone': user[1], 'username': user[2], 'avatar_url': user[3], 'display_name': user[4], 'status': user[5]}})
 
     # POST /logout
     if method == 'POST' and action == 'logout':

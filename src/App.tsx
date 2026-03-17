@@ -5,8 +5,9 @@ import ImageCropModal from "@/components/ImageCropModal";
 
 const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
 const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb-09980e8a9c27";
+const UPDATE_PROFILE_URL = "https://functions.poehali.dev/906e9817-4957-4d99-9bc2-082e8b2d03df";
 
-interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; }
+interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; display_name?: string | null; status?: string | null; }
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
 
@@ -1075,7 +1076,7 @@ function PrivacyRow({ icon, label, value, onChange }: {
   );
 }
 
-function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange, authUser, onLogout, onAvatarUpdate }: {
+function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onToggleOnlineStatus, messagePrivacy, onMessagePrivacyChange, avatarPrivacy, onAvatarPrivacyChange, callPrivacy, onCallPrivacyChange, authUser, onLogout, onAvatarUpdate, onProfileUpdate }: {
   globalPin: string | null;
   onChangePin: () => void;
   onRemovePin: () => void;
@@ -1090,10 +1091,16 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
   authUser?: AuthUser | null;
   onLogout?: () => void;
   onAvatarUpdate?: (url: string) => void;
+  onProfileUpdate?: (user: AuthUser) => void;
 }) {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [statusValue, setStatusValue] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1140,6 +1147,36 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
       onAvatarUpdate?.(null as unknown as string);
     }
     setAvatarUploading(false);
+  }
+
+  async function handleSaveName() {
+    const token = localStorage.getItem("auth_token");
+    if (!token || !authUser) return;
+    setSaving(true);
+    const res = await fetch(UPDATE_PROFILE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Token": token },
+      body: JSON.stringify({ display_name: nameValue }),
+    });
+    const data = await res.json();
+    if (data.user) onProfileUpdate?.(data.user);
+    setSaving(false);
+    setEditingName(false);
+  }
+
+  async function handleSaveStatus() {
+    const token = localStorage.getItem("auth_token");
+    if (!token || !authUser) return;
+    setSaving(true);
+    const res = await fetch(UPDATE_PROFILE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Token": token },
+      body: JSON.stringify({ status: statusValue }),
+    });
+    const data = await res.json();
+    if (data.user) onProfileUpdate?.(data.user);
+    setSaving(false);
+    setEditingStatus(false);
   }
 
   const features = [
@@ -1192,11 +1229,36 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
             )}
             <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
           </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-bold">{authUser ? `@${authUser.username}` : "Алексей Смирнов"}</h2>
-            <p className="text-sm text-muted-foreground">{authUser ? authUser.phone : "+7 (999) 123-45-67"}</p>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className={`w-2 h-2 rounded-full ${hideOnlineStatus ? "bg-muted-foreground/40" : "bg-emerald-500"}`} />
+          <div className="flex-1 min-w-0">
+            {editingName ? (
+              <div className="flex items-center gap-1.5 mb-1">
+                <input
+                  autoFocus
+                  value={nameValue}
+                  onChange={e => setNameValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleSaveName(); if (e.key === "Escape") setEditingName(false); }}
+                  placeholder={authUser?.username ?? "Имя"}
+                  maxLength={100}
+                  className="flex-1 min-w-0 bg-muted/60 rounded-xl px-2.5 py-1 text-sm font-bold outline-none border border-neon-purple/40 focus:border-neon-purple"
+                />
+                <button onClick={handleSaveName} disabled={saving} className="w-7 h-7 rounded-xl gradient-purple-blue flex items-center justify-center flex-shrink-0">
+                  {saving ? <Icon name="Loader2" size={12} className="text-white animate-spin" /> : <Icon name="Check" size={12} className="text-white" />}
+                </button>
+                <button onClick={() => setEditingName(false)} className="w-7 h-7 rounded-xl bg-muted/50 flex items-center justify-center flex-shrink-0">
+                  <Icon name="X" size={12} className="text-muted-foreground" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 group mb-0.5">
+                <h2 className="text-lg font-bold truncate">{authUser?.display_name || (authUser ? `@${authUser.username}` : "Алексей Смирнов")}</h2>
+                <button onClick={() => { setNameValue(authUser?.display_name ?? ""); setEditingName(true); }} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <Icon name="Pencil" size={13} className="text-muted-foreground hover:text-neon-purple" />
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground truncate">{authUser ? authUser.phone : "+7 (999) 123-45-67"}</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hideOnlineStatus ? "bg-muted-foreground/40" : "bg-emerald-500"}`} />
               <span className={`text-xs font-medium ${hideOnlineStatus ? "text-muted-foreground" : "text-emerald-400"}`}>
                 {hideOnlineStatus ? "Скрыт" : "В сети"}
               </span>
@@ -1209,8 +1271,33 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
           )}
         </div>
 
-        <div className="glass rounded-2xl p-3 mb-4 border border-neon-purple/20">
-          <p className="text-sm text-muted-foreground italic">"На связи всегда 🚀"</p>
+        <div className="glass rounded-2xl p-3 mb-4 border border-neon-purple/20 group">
+          {editingStatus ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={statusValue}
+                onChange={e => setStatusValue(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleSaveStatus(); if (e.key === "Escape") setEditingStatus(false); }}
+                placeholder="Ваш статус..."
+                maxLength={200}
+                className="flex-1 bg-transparent text-sm outline-none text-foreground italic"
+              />
+              <button onClick={handleSaveStatus} disabled={saving} className="w-7 h-7 rounded-xl gradient-purple-blue flex items-center justify-center flex-shrink-0">
+                {saving ? <Icon name="Loader2" size={12} className="text-white animate-spin" /> : <Icon name="Check" size={12} className="text-white" />}
+              </button>
+              <button onClick={() => setEditingStatus(false)} className="w-7 h-7 rounded-xl bg-muted/50 flex items-center justify-center flex-shrink-0">
+                <Icon name="X" size={12} className="text-muted-foreground" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-sm text-muted-foreground italic">"{authUser?.status || "На связи всегда 🚀"}"</p>
+              <button onClick={() => { setStatusValue(authUser?.status ?? ""); setEditingStatus(true); }} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                <Icon name="Pencil" size={13} className="text-muted-foreground hover:text-neon-purple" />
+              </button>
+            </div>
+          )}
         </div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Конфиденциальность</h3>
@@ -1526,7 +1613,7 @@ export default function App() {
       case "calls": return <CallsTab />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
-      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url ?? null }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
+      case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url ?? null }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} onProfileUpdate={(user) => { const updated = { ...authUser!, ...user }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
     }
   };
 
