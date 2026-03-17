@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import AuthPage from "@/AuthPage";
+import ImageCropModal from "@/components/ImageCropModal";
 
 const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
 const UPLOAD_AVATAR_URL = "https://functions.poehali.dev/fc44fdc9-7f8e-41b5-80eb-09980e8a9c27";
@@ -1092,10 +1093,19 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
 }) {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
 
-  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = () => setCropSrc(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  async function handleCropDone(blob: Blob) {
+    setCropSrc(null);
     const token = localStorage.getItem("auth_token");
     if (!token) return;
     setAvatarUploading(true);
@@ -1105,7 +1115,7 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
       const res = await fetch(UPLOAD_AVATAR_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Token": token },
-        body: JSON.stringify({ image: base64, contentType: file.type }),
+        body: JSON.stringify({ image: base64, contentType: "image/jpeg" }),
       });
       const data = await res.json();
       if (data.avatar_url) {
@@ -1113,7 +1123,7 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
       }
       setAvatarUploading(false);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   }
 
   const features = [
@@ -1126,6 +1136,14 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
   ];
 
   return (
+    <>
+    {cropSrc && (
+      <ImageCropModal
+        imageSrc={cropSrc}
+        onCrop={handleCropDone}
+        onCancel={() => setCropSrc(null)}
+      />
+    )}
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="px-4 pt-6 pb-4">
         <div className="flex items-center gap-4 mb-5">
@@ -1252,6 +1270,7 @@ function ProfileTab({ globalPin, onChangePin, onRemovePin, hideOnlineStatus, onT
         </button>
       </div>
     </div>
+    </>
   );
 }
 
