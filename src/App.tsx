@@ -1468,7 +1468,13 @@ export default function App() {
                   onClick={() => setActiveTab(item.id)}
                   className={`flex flex-col items-center gap-0.5 px-2.5 py-2 rounded-2xl transition-all duration-200 ${isActive ? "nav-active" : "text-muted-foreground hover:text-foreground hover:bg-muted/30"}`}
                 >
-                  <Icon name={item.icon} size={20} className={isActive ? "text-neon-purple" : ""} />
+                  {item.id === "profile" && authUser ? (
+                    <div className={`w-5 h-5 rounded-lg gradient-purple-blue flex items-center justify-center text-white text-[9px] font-bold ${isActive ? "ring-2 ring-neon-purple/60" : ""}`}>
+                      {authUser.username.slice(0, 2).toUpperCase()}
+                    </div>
+                  ) : (
+                    <Icon name={item.icon} size={20} className={isActive ? "text-neon-purple" : ""} />
+                  )}
                   <span className={`text-[9px] font-medium ${isActive ? "text-neon-purple" : ""}`}>{item.label}</span>
                 </button>
               );
