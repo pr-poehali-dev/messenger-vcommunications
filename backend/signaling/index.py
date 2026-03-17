@@ -197,10 +197,25 @@ def handler(event: dict, context) -> dict:
             cur.close(); conn.close()
             return json_response(400, {'error': 'call_id обязателен'})
         cur.execute(
-            f'''UPDATE "{schema}".calls SET status = 'ended', updated_at = NOW()
+            f'''SELECT status, created_at FROM "{schema}".calls
                 WHERE id = %s AND (caller_id = %s OR callee_id = %s)''',
             (call_id, my_id, my_id)
         )
+        call_row = cur.fetchone()
+        if call_row and call_row[0] == 'active':
+            cur.execute(
+                f'''UPDATE "{schema}".calls
+                    SET status = 'ended', updated_at = NOW(), ended_at = NOW(),
+                        duration_sec = GREATEST(0, EXTRACT(EPOCH FROM (NOW() - created_at))::int)
+                    WHERE id = %s''',
+                (call_id,)
+            )
+        else:
+            cur.execute(
+                f'''UPDATE "{schema}".calls SET status = 'ended', updated_at = NOW(), ended_at = NOW()
+                    WHERE id = %s AND (caller_id = %s OR callee_id = %s)''',
+                (call_id, my_id, my_id)
+            )
         conn.commit()
         cur.close(); conn.close()
         return json_response(200, {'ok': True})
@@ -321,6 +336,50 @@ def handler(event: dict, context) -> dict:
             result['answer'] = json.loads(answer)
 
         return json_response(200, result)
+
+    # ─── GET ?action=history ─────────────────────────────────────────────────
+    if method == 'GET' and action == 'history':
+        limit = min(int(qs.get('limit', '50')), 100)
+        cur.execute(
+            f'''SELECT c.id, c.caller_id, c.callee_id, c.status, c.call_type,
+                       c.created_at, c.ended_at, c.duration_sec,
+                       u1.username AS caller_username, u1.display_name AS caller_name, u1.avatar_url AS caller_avatar,
+                       u2.username AS callee_username, u2.display_name AS callee_name, u2.avatar_url AS callee_avatar
+                FROM "{schema}".calls c
+                JOIN "{schema}".users u1 ON u1.id = c.caller_id
+                JOIN "{schema}".users u2 ON u2.id = c.callee_id
+                WHERE (c.caller_id = %s OR c.callee_id = %s)
+                  AND c.status IN ('ended', 'missed', 'rejected')
+                ORDER BY c.created_at DESC
+                LIMIT %s''',
+            (my_id, my_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        result = []
+        for r in rows:
+            (cid, caller_id, callee_id, status, call_type, created_at, ended_at,
+             duration_sec, c_uname, c_dname, c_avatar, e_uname, e_dname, e_avatar) = r
+            direction = 'outgoing' if caller_id == my_id else 'incoming'
+            other = {
+                'id': callee_id if direction == 'outgoing' else caller_id,
+                'username': e_uname if direction == 'outgoing' else c_uname,
+                'display_name': e_dname if direction == 'outgoing' else c_dname,
+                'avatar_url': e_avatar if direction == 'outgoing' else c_avatar,
+            }
+            missed = (status == 'missed') or (status == 'rejected' and direction == 'incoming') or (status == 'ended' and duration_sec == 0)
+            result.append({
+                'id': cid,
+                'other_user': other,
+                'direction': direction,
+                'call_type': call_type,
+                'status': status,
+                'missed': missed,
+                'created_at': created_at.isoformat() if created_at else None,
+                'ended_at': ended_at.isoformat() if ended_at else None,
+                'duration_sec': duration_sec,
+            })
+        return json_response(200, {'calls': result})
 
     cur.close(); conn.close()
     return json_response(404, {'error': 'Неизвестный action'})

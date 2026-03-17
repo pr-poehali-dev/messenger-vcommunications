@@ -1051,9 +1051,52 @@ function ContactsTab({ authUser }: { authUser?: AuthUser | null }) {
   );
 }
 
-function CallsTab({ authUser }: { authUser?: AuthUser | null }) {
+interface CallHistoryItem {
+  id: number;
+  other_user: OtherUser;
+  direction: 'incoming' | 'outgoing';
+  call_type: 'video' | 'audio';
+  status: string;
+  missed: boolean;
+  created_at: string | null;
+  ended_at: string | null;
+  duration_sec: number | null;
+}
+
+function CallsTab({ authUser, onCall }: { authUser?: AuthUser | null; onCall?: (user: OtherUser, type: 'video' | 'audio') => void }) {
   const [tab, setTab] = useState<"all" | "missed">("all");
-  const filtered = tab === "missed" ? CALLS.filter(c => c.missed) : CALLS;
+  const [calls, setCalls] = useState<CallHistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token") || "";
+    fetchWithTimeout(SIGNALING_URL + "?action=history", { headers: { "X-Session-Token": token } })
+      .then(r => r.json())
+      .then(d => { if (d.calls) setCalls(d.calls); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = tab === "missed" ? calls.filter(c => c.missed) : calls;
+
+  function fmtCallTime(iso: string | null) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+    const t = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+    if (diffDays === 0) return `Сегодня, ${t}`;
+    if (diffDays === 1) return `Вчера, ${t}`;
+    if (diffDays < 7) return d.toLocaleDateString('ru', { weekday: 'short' }) + `, ${t}`;
+    return d.toLocaleDateString('ru', { day: 'numeric', month: 'short' }) + `, ${t}`;
+  }
+
+  function fmtDuration(sec: number | null) {
+    if (!sec || sec <= 0) return "";
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -1072,9 +1115,6 @@ function CallsTab({ authUser }: { authUser?: AuthUser | null }) {
               {authUser?.status && <p className="text-xs text-muted-foreground truncate">{authUser.status}</p>}
             </div>
           </div>
-          <button className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground hover:text-neon-cyan">
-            <Icon name="PhoneCall" size={18} />
-          </button>
         </div>
         <div className="flex gap-2 bg-muted/50 p-1 rounded-xl">
           {(["all", "missed"] as const).map(t => (
@@ -1085,21 +1125,34 @@ function CallsTab({ authUser }: { authUser?: AuthUser | null }) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 space-y-1">
+        {loading && (
+          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">Загрузка...</div>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+            <Icon name="PhoneOff" size={40} className="opacity-20" />
+            <p className="text-sm">{tab === "missed" ? "Нет пропущенных звонков" : "История звонков пуста"}</p>
+          </div>
+        )}
         {filtered.map((call, i) => (
-          <div key={call.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all cursor-pointer group animate-fade-in" style={{ animationDelay: `${i * 0.07}s` }}>
-            <Avatar initials={call.contact.avatar} color={call.contact.color} />
+          <div key={call.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl hover:bg-muted/40 transition-all cursor-pointer group animate-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
+            <UserAvatar user={call.other_user} size={10} />
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm">{call.contact.name}</div>
+              <div className="font-semibold text-sm truncate">{call.other_user.display_name || `@${call.other_user.username}`}</div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <Icon name={call.direction === "incoming" ? "PhoneIncoming" : "PhoneOutgoing"} size={12} className={call.missed ? "text-destructive" : "text-emerald-500"} />
                 <span className={`text-xs ${call.missed ? "text-destructive" : "text-muted-foreground"}`}>
-                  {call.time}{call.duration && ` · ${call.duration}`}
+                  {fmtCallTime(call.created_at)}{fmtDuration(call.duration_sec) && ` · ${fmtDuration(call.duration_sec)}`}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-1">
-              {call.type === "video" ? <Icon name="Video" size={14} className="text-muted-foreground" /> : <Icon name="Phone" size={14} className="text-muted-foreground" />}
-              <button className="ml-1 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted text-neon-cyan">
+              <Icon name={call.call_type === "video" ? "Video" : "Phone"} size={14} className="text-muted-foreground" />
+              <button
+                onClick={() => onCall?.(call.other_user, call.call_type)}
+                className="ml-1 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted text-neon-cyan"
+                title="Перезвонить"
+              >
                 <Icon name="PhoneCall" size={16} />
               </button>
             </div>
@@ -2154,7 +2207,7 @@ export default function App() {
     switch (activeTab) {
       case "chats": return <ChatsTab sharedPin={globalPin} onPinCreated={setGlobalPin} hideOnlineStatus={hideOnlineStatus} messagePrivacy={messagePrivacy} onGoToPrivacy={() => setActiveTab("profile")} authUser={authUser} onCall={startCall} />;
       case "contacts": return <ContactsTab authUser={authUser} />;
-      case "calls": return <CallsTab authUser={authUser} />;
+      case "calls": return <CallsTab authUser={authUser} onCall={startCall} />;
       case "status": return <StatusTab />;
       case "media": return <MediaTab />;
       case "profile": return <ProfileTab globalPin={globalPin} onChangePin={requestSetPin} onRemovePin={removePin} hideOnlineStatus={hideOnlineStatus} onToggleOnlineStatus={() => setHideOnlineStatus(v => !v)} messagePrivacy={messagePrivacy} onMessagePrivacyChange={setMessagePrivacy} avatarPrivacy={avatarPrivacy} onAvatarPrivacyChange={setAvatarPrivacy} callPrivacy={callPrivacy} onCallPrivacyChange={setCallPrivacy} authUser={authUser} onLogout={handleLogout} onAvatarUpdate={(url) => { const updated = { ...authUser!, avatar_url: url ?? null }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} onProfileUpdate={(user) => { const updated = { ...authUser!, ...user }; setAuthUser(updated); localStorage.setItem("auth_user", JSON.stringify(updated)); }} />;
