@@ -2100,6 +2100,21 @@ export default function App() {
     return () => clearInterval(id);
   }, [authUser]);
 
+  // keep-alive: прогрев всех функций каждые 4 минуты чтобы не было cold start
+  useEffect(() => {
+    if (!authUser) return;
+    const warmup = () => {
+      fetch(`${AUTH_URL}?action=ping`).catch(() => {});
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        fetch(`${MESSAGES_URL}?action=ping`, { method: "POST", headers: { "X-Session-Token": token } }).catch(() => {});
+        fetch(`${SIGNALING_URL}?action=incoming`, { headers: { "X-Session-Token": token } }).catch(() => {});
+      }
+    };
+    const id = setInterval(warmup, 4 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [authUser]);
+
   // Poll for incoming calls
   useEffect(() => {
     if (!authUser) return;
