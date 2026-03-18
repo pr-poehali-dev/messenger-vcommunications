@@ -19,6 +19,18 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, ms = 800
   }
 }
 
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 2, ms = 8000): Promise<Response> {
+  try {
+    return await fetchWithTimeout(url, options, ms);
+  } catch (err) {
+    if (retries > 0) {
+      await new Promise(r => setTimeout(r, 1000));
+      return fetchWithRetry(url, options, retries - 1, ms);
+    }
+    throw err;
+  }
+}
+
 interface AuthUser { id: number; phone: string; username: string; avatar_url?: string | null; display_name?: string | null; status?: string | null; }
 
 type Tab = "chats" | "contacts" | "calls" | "status" | "media" | "profile";
@@ -306,14 +318,22 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onlineRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollIntervalRef = useRef(4000);
   const token = localStorage.getItem("auth_token") || "";
+
+  function reschedulePoll(loadFn: (id?: number) => void) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      setLastId(prev => { loadFn(prev); return prev; });
+    }, pollIntervalRef.current);
+  }
 
   async function loadMessages(after?: number) {
     try {
       const url = after
         ? `${MESSAGES_URL}?action=messages&conv_id=${convId}&after=${after}`
         : `${MESSAGES_URL}?action=messages&conv_id=${convId}`;
-      const res = await fetchWithTimeout(url, { headers: { "X-Session-Token": token } });
+      const res = await fetchWithRetry(url, { headers: { "X-Session-Token": token } });
       const data = await res.json();
       if (data.messages) {
         if (after) {
@@ -333,13 +353,21 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
           if (data.messages.length > 0) setLastId(data.messages[data.messages.length - 1].id);
         }
       }
-    } catch (_) { setOffline(true); wasOfflineRef.current = true; return; }
-    setOffline(false);
+    } catch (_) {
+      setOffline(true);
+      wasOfflineRef.current = true;
+      pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 30000);
+      reschedulePoll(loadMessages);
+      return;
+    }
     if (wasOfflineRef.current) {
       wasOfflineRef.current = false;
+      pollIntervalRef.current = 4000;
+      reschedulePoll(loadMessages);
       setReconnected(true);
       setTimeout(() => setReconnected(false), 2500);
     }
+    setOffline(false);
   }
 
   async function loadOnlineStatus() {
@@ -351,10 +379,11 @@ function ChatView({ convId, otherUser, myId, onBack, hideOnlineStatus, messagePr
   }
 
   useEffect(() => {
+    pollIntervalRef.current = 4000;
     loadMessages();
     pollRef.current = setInterval(() => {
       setLastId(prev => { loadMessages(prev); return prev; });
-    }, 4000);
+    }, pollIntervalRef.current);
     loadOnlineStatus();
     onlineRef.current = setInterval(loadOnlineStatus, 30000);
     return () => {

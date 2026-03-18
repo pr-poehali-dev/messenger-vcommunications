@@ -3,6 +3,23 @@ import Icon from "@/components/ui/icon";
 
 const AUTH_URL = "https://functions.poehali.dev/3c0a32d6-c17c-47f4-a846-fb1c453c24fc";
 
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, delayMs = 1200): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (err) {
+    clearTimeout(tid);
+    if (retries > 0) {
+      await new Promise(r => setTimeout(r, delayMs));
+      return fetchWithRetry(url, options, retries - 1, delayMs * 1.5);
+    }
+    throw err;
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 type Mode = "login" | "register";
 
 interface AuthUser {
@@ -31,7 +48,7 @@ export default function AuthPage({ onAuth }: AuthPageProps) {
     setLoading(true);
     try {
       if (mode === "register") {
-        const res = await fetch(`${AUTH_URL}?action=register`, {
+        const res = await fetchWithRetry(`${AUTH_URL}?action=register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone, username, password }),
@@ -41,7 +58,7 @@ export default function AuthPage({ onAuth }: AuthPageProps) {
         localStorage.setItem("auth_token", data.token);
         onAuth(data.user, data.token);
       } else {
-        const res = await fetch(`${AUTH_URL}?action=login`, {
+        const res = await fetchWithRetry(`${AUTH_URL}?action=login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ login, password }),
@@ -52,7 +69,7 @@ export default function AuthPage({ onAuth }: AuthPageProps) {
         onAuth(data.user, data.token);
       }
     } catch {
-      setError("Ошибка соединения с сервером");
+      setError("Нет соединения с сервером — попробуй ещё раз");
     } finally {
       setLoading(false);
     }
